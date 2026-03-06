@@ -1,39 +1,36 @@
-
-import React, { useState } from 'react';
-import { User, Store } from '../types';
+﻿import React, { useState } from 'react';
+import { User } from '../types';
+import { login, setAuthToken } from '../services/api';
 
 interface LoginProps {
   onLogin: (user: User) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
-  const [role, setRole] = useState<'Admin' | 'Staff'>('Admin');
-  const [selectedStore, setSelectedStore] = useState<string>('S1');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const staffStores: Store[] = [
-    { id: 'S1', name: 'Main Warehouse', location: 'Downtown', type: 'Warehouse' },
-    { id: 'S2', name: 'Retail Store A', location: 'City Mall', type: 'Retail' },
-    { id: 'S3', name: 'Repair Center', location: 'West End', type: 'Repair' },
-  ];
-
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (role === 'Staff' && !selectedStore) {
-      setError('Please select a store to continue.');
+    if (!username.trim() || !password) {
+      setError('Username and password are required.');
       return;
     }
 
-    let user: User;
-    if (role === 'Admin') {
-      user = { id: 'admin-01', name: 'Admin User', role: 'Admin' };
-    } else {
-      user = { id: 'staff-01', name: 'Staff User', role: 'Staff', assignedStoreId: selectedStore };
+    try {
+      setIsLoading(true);
+      const response = await login({ username: username.trim(), password });
+      setAuthToken(response.token);
+      onLogin(response.user as User);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setIsLoading(false);
     }
-    
-    onLogin(user);
   };
 
   return (
@@ -44,57 +41,45 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <span className="material-icons text-white text-4xl">smartphone</span>
           </div>
           <h1 className="text-3xl font-black text-text-dark tracking-tight">Welcome to MobMastery</h1>
-          <p className="text-text-secondary mt-2">Sign in to access your store's dashboard.</p>
+          <p className="text-text-secondary mt-2">Sign in with your assigned credentials.</p>
         </div>
 
         <div className="bg-surface p-8 rounded-3xl shadow-xl border border-secondary/20">
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Select Your Role</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button 
-                  type="button" 
-                  onClick={() => setRole('Admin')}
-                  className={`py-3 rounded-xl font-bold text-sm transition-all ${role === 'Admin' ? 'bg-primary text-white shadow-md' : 'bg-background text-text-secondary'}`}
-                >
-                  Admin
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => setRole('Staff')}
-                  className={`py-3 rounded-xl font-bold text-sm transition-all ${role === 'Staff' ? 'bg-primary text-white shadow-md' : 'bg-background text-text-secondary'}`}
-                >
-                  Staff
-                </button>
-              </div>
+              <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Username</label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/50"
+                placeholder="Enter username"
+              />
             </div>
 
-            {role === 'Staff' && (
-              <div className="animate-in fade-in duration-300">
-                <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Assign to Store</label>
-                <select 
-                  value={selectedStore}
-                  onChange={(e) => setSelectedStore(e.target.value)}
-                  className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/50"
-                >
-                  {staffStores.map(store => (
-                    <option key={store.id} value={store.id}>{store.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            
+            <div>
+              <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/50"
+                placeholder="Enter password"
+              />
+            </div>
+
             {error && <p className="text-xs text-center font-bold text-error">{error}</p>}
 
             <div>
-              <button 
+              <button
                 type="submit"
-                className="w-full py-4 bg-text-dark text-white rounded-xl font-bold uppercase tracking-widest text-xs shadow-xl hover:scale-105 active:scale-100 transition-transform"
+                disabled={isLoading}
+                className="w-full py-4 bg-text-dark text-white rounded-xl font-bold uppercase tracking-widest text-xs shadow-xl hover:scale-105 active:scale-100 transition-transform disabled:opacity-70"
               >
-                Login
+                {isLoading ? 'Signing In...' : 'Login'}
               </button>
             </div>
-            <p className="text-center text-[10px] text-text-secondary uppercase tracking-widest font-bold">Authentication Simulated</p>
+            <p className="text-center text-[10px] text-text-secondary uppercase tracking-widest font-bold">Admin provides each employee username and password.</p>
           </form>
         </div>
       </div>

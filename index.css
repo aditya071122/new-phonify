@@ -23,17 +23,29 @@
   --color-success-600: #059669;
   --color-success-500: #10b981;
   --color-success-100: #d1fae5;
+  --color-success-50: #ecfdf5;
 
   --color-warning-600: #d97706;
   --color-warning-500: #f59e0b;
   --color-warning-100: #fef3c7;
+  --color-warning-50: #fffbeb;
 
   --color-error-600: #dc2626;
   --color-error-500: #ef4444;
   --color-error-100: #fee2e2;
+  --color-error-50: #fef2f2;
 
   --color-info-500: #3b82f6;
   --color-info-100: #dbeafe;
+
+  /* Legacy aliases used across view-level CSS files */
+  --primary: var(--color-primary-600);
+  --teal: var(--color-teal-500);
+  --success: var(--color-success-500);
+  --warning: var(--color-warning-500);
+  --error: var(--color-error-500);
+  --info: var(--color-info-500);
+  --transition: 0.2s ease;
 
   /* Neutral */
   --color-slate-900: #0f172a;
@@ -266,6 +278,36 @@ body {
   --text-tertiary: #94a3b8;
   --border-color: #334155;
   --border-dark: #475569;
+}
+
+/* Shared Surface Helpers */
+.card {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+}
+
+.form-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background-color: var(--bg-secondary);
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--color-primary-500);
+  background-color: var(--bg-primary);
+}
+
+.muted-text {
+  color: var(--text-secondary);
 }
 
 /* Responsive Typography */

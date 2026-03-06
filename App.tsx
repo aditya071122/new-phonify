@@ -16,6 +16,7 @@ import Buyback from './views/Buyback';
 import FinancialDashboard from './views/FinancialDashboard';
 import Employees from './views/Employees';
 import Customers from './views/Customers';
+import { clearAuthToken, getAuthToken, logout as apiLogout } from './services/api';
 
 const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -36,12 +37,25 @@ const App: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    if (user && !getAuthToken()) {
+      localStorage.removeItem('quality-mobiles-user');
+      setUser(null);
+    }
+  }, [user]);
+
   const handleLogin = (loggedInUser: User) => {
     localStorage.setItem('quality-mobiles-user', JSON.stringify(loggedInUser));
     setUser(loggedInUser);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await apiLogout();
+    } catch {
+      // Ignore logout API failures; local session should still clear.
+    }
+    clearAuthToken();
     localStorage.removeItem('quality-mobiles-user');
     setUser(null);
   };
@@ -81,9 +95,9 @@ const App: React.FC = () => {
                   <Route path="/expenses" element={<Expenses />} />
                   <Route path="/payments" element={<Payments />} />
                   <Route path="/accessories" element={<Accessories />} />
-                  <Route path="/financial" element={<FinancialDashboard />} />
-                  <Route path="/customers" element={<Customers />} />
-                  <Route path="/employees" element={<Employees />} />
+                  <Route path="/financial" element={<FinancialDashboard user={user} />} />
+                  <Route path="/customers" element={<Customers user={user} />} />
+                  <Route path="/employees" element={<Employees user={user} />} />
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
                   <Route path="/login" element={<Navigate to="/dashboard" replace />} />
                 </Routes>

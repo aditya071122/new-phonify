@@ -1,186 +1,218 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { User } from '../types';
+import { createProduct, listProducts, type ApiProduct } from '../services/api';
 
-import React, { useState, useMemo, FC, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-// FIX: Imported KpiData to resolve 'Cannot find name' error.
-import { Product, Store, StoreInventory, User, KpiData } from '../types';
-import KpiCard from '../components/KpiCard';
+const Inventory: React.FC<{ user: User }> = ({ user }) => {
+  const [searchParams] = useSearchParams();
+  const [products, setProducts] = useState<ApiProduct[]>([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [formData, setFormData] = useState({
+    sku: '',
+    name: '',
+    category: 'new_phone' as NonNullable<ApiProduct['category']>,
+    description: '',
+    price: '',
+    stock_quantity: '0',
+  });
 
-// --- MOCK DATABASE ---
-const mockStores: Store[] = [
-    { id: 'S1', name: 'Main Warehouse', location: 'Downtown', type: 'Warehouse' },
-    { id: 'S2', name: 'Retail Store A', location: 'City Mall', type: 'Retail' },
-    { id: 'S3', name: 'Repair Center', location: 'West End', type: 'Repair' },
-];
-
-const mockProducts: Product[] = [
-    { id: 'P1', name: 'iPhone 15 Pro', brand: 'Apple', model: 'A3102', storage: '256GB', color: 'Natural Titanium', barcode: '1001', purchasePrice: 95000, sellingPrice: 139999, minStockLevel: 5, category: 'New Phones', image: 'https://images.unsplash.com/photo-1695026522854-4a242d31518f?w=100' },
-    { id: 'P2', name: 'Samsung S24 Ultra', brand: 'Samsung', model: 'SM-S928', storage: '512GB', color: 'Titanium Black', barcode: '1002', purchasePrice: 65000, sellingPrice: 79999, minStockLevel: 8, category: 'New Phones', image: 'https://images.unsplash.com/photo-1705096954269-37651a147775?w=100' },
-    { id: 'B1', name: 'iPhone 12 (Used)', brand: 'Apple', model: 'A2403', storage: '128GB', color: 'Blue', barcode: '8001', purchasePrice: 22000, sellingPrice: 28000, minStockLevel: 1, category: 'Buyback Phones', image: 'https://images.unsplash.com/photo-1611791485440-24e8239a0377?w=100' },
-    { id: 'A1', name: 'Tempered Glass', brand: 'Generic', model: 'Universal', storage: '', color: '', barcode: '2001', purchasePrice: 50, sellingPrice: 299, minStockLevel: 20, category: 'Accessories', image: 'https://images.unsplash.com/photo-1542496658-e33a6d0d50f6?w=100' },
-    { id: 'RP1', name: 'iPhone 15 Pro Screen', brand: 'OEM', model: 'OEM-SCR-15P', storage: '', color: '', barcode: '7001', purchasePrice: 12000, sellingPrice: 15000, minStockLevel: 10, category: 'Repair Parts', image: 'https://images.unsplash.com/photo-1603893353568-d0b7010a4a8a?w=100' },
-];
-
-const mockStoreInventory: StoreInventory[] = [
-    { id: 'SI1', storeId: 'S1', productId: 'P1', quantity: 50, lastUpdated: new Date().toISOString() },
-    { id: 'SI2', storeId: 'S2', productId: 'P1', quantity: 3, lastUpdated: new Date().toISOString() },
-    { id: 'SI3', storeId: 'S1', productId: 'P2', quantity: 30, lastUpdated: new Date().toISOString() },
-    { id: 'SI4', storeId: 'S3', productId: 'RP1', quantity: 15, lastUpdated: new Date().toISOString() },
-    { id: 'SI5', storeId: 'S2', productId: 'A1', quantity: 45, lastUpdated: new Date().toISOString() },
-    { id: 'SI6', storeId: 'S2', productId: 'B1', quantity: 1, lastUpdated: new Date().toISOString() },
-];
-
-const Inventory: FC<{ user: User }> = ({ user }) => {
-  const navigate = useNavigate();
-  const importFileRef = useRef<HTMLInputElement>(null);
-
-  const [products, setProducts] = useState(mockProducts);
-  const [stock, setStock] = useState(mockStoreInventory);
-  
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedStore, setSelectedStore] = useState(user.role === 'Admin' ? 'All' : user.assignedStoreId || 'All');
-  
-  const categories = ['All', 'New Phones', 'Buyback Phones', 'Accessories'];
-
-  const displayData = useMemo(() => {
-    // Client-side "JOIN" between products and their stock levels
-    const joined = products.map(product => {
-      const stockRecords = stock.filter(s => s.productId === product.id);
-      return { ...product, stockRecords };
-    });
-
-    let categoryFiltered = selectedCategory === 'All' ? joined : joined.filter(p => p.category === selectedCategory);
-    
-    return categoryFiltered.flatMap(product => {
-        if (selectedStore === 'All') {
-            if (product.stockRecords.length === 0) {
-                // FIX: Added storeId: undefined to ensure a consistent object shape, fixing the 'property does not exist' error.
-                return [{ ...product, storeName: 'N/A', quantity: 0, stockId: `none-${product.id}`, storeId: undefined }];
-            }
-            return product.stockRecords.map(s => {
-                const store = mockStores.find(st => st.id === s.storeId);
-                return { ...product, storeId: store?.id, storeName: store?.name, quantity: s.quantity, stockId: s.id };
-            });
-        }
-        const stockInStore = product.stockRecords.find(s => s.storeId === selectedStore);
-        return [{ ...product, storeId: selectedStore, storeName: mockStores.find(st => st.id === selectedStore)?.name, quantity: stockInStore?.quantity || 0, stockId: stockInStore?.id || `none-${product.id}-${selectedStore}` }];
-    });
-  }, [products, stock, selectedCategory, selectedStore]);
-
-  const lowStockCount = useMemo(() => {
-      return displayData.filter(item => item.quantity > 0 && item.quantity < item.minStockLevel).length;
-  }, [displayData]);
-  
-  const handleStockAdjustment = (stockId: string, delta: number, productId: string, storeId: string) => {
-    setStock(prev => {
-        const existing = prev.find(s => s.id === stockId);
-        if (existing) {
-            return prev.map(s => s.id === stockId ? { ...s, quantity: Math.max(0, s.quantity + delta) } : s);
-        }
-        if (delta > 0) {
-            const newStockItem: StoreInventory = { id: `SI${Date.now()}`, productId, storeId, quantity: delta, lastUpdated: new Date().toISOString() };
-            return [...prev, newStockItem];
-        }
-        return prev;
-    });
-  };
-
-  const handleExport = () => {
-    const headers = ['Barcode', 'Brand', 'Model', 'Category', 'Store Name', 'Stock Quantity', 'Selling Price'];
-    const rows = displayData.map(item => [item.barcode, item.brand, item.model, item.category, item.storeName, item.quantity, item.sellingPrice].join(','));
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "inventory_export.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-  
-  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const text = e.target?.result as string;
-        alert(`CSV import simulation for: ${file.name}`);
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        const data = await listProducts();
+        setProducts(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load inventory');
+      } finally {
+        setLoading(false);
+      }
     };
-    reader.readAsText(file);
-  };
 
-  const getStatus = (quantity: number, minStock: number) => {
-    if (quantity <= 0) return { label: 'Out of Stock', color: 'bg-error/10 text-error' };
-    if (quantity < minStock) return { label: 'Low Stock', color: 'bg-warning/10 text-warning' };
-    return { label: 'In Stock', color: 'bg-success/10 text-success' };
-  };
+    void load();
+  }, []);
 
-  const kpis: KpiData[] = [
-      { label: 'Total Products', value: products.length.toString(), icon: 'inventory_2', color: '#208091', bgLight: 'rgba(32,128,145,0.1)', trendLabel: 'Master records' },
-      { label: 'Total Stock Units', value: stock.reduce((s,i) => s + i.quantity, 0).toLocaleString(), icon: 'all_inbox', color: '#20C08D', bgLight: 'rgba(32,192,141,0.1)', trendLabel: 'Across all stores' },
-      { label: 'Low Stock Items', value: lowStockCount.toString(), icon: 'warning', color: '#FF9900', bgLight: 'rgba(255,153,0,0.1)', trendLabel: 'Needs reordering' },
-      { label: 'Inventory Value', value: '₹1.2Cr', icon: 'account_balance_wallet', color: '#E6815F', bgLight: 'rgba(230,129,95,0.1)', trendLabel: 'Estimated purchase cost' },
-  ]
+  useEffect(() => {
+    setSearch(searchParams.get('q') || '');
+  }, [searchParams]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter((p) =>
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q) ||
+      (p.description || '').toLowerCase().includes(q)
+    );
+  }, [products, search]);
+
+  const lowStock = filtered.filter((p) => p.stock_quantity < 5).length;
+  const totalStock = filtered.reduce((sum, p) => sum + p.stock_quantity, 0);
+  const inventoryValue = filtered.reduce((sum, p) => sum + Number(p.price) * p.stock_quantity, 0);
+
+  const handleAddInventoryItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError('');
+
+    if (!formData.sku.trim() || !formData.name.trim()) {
+      setFormError('SKU and product name are required.');
+      return;
+    }
+    if (!formData.price || Number.isNaN(Number(formData.price)) || Number(formData.price) < 0) {
+      setFormError('Enter a valid price.');
+      return;
+    }
+    if (!formData.stock_quantity || Number.isNaN(Number(formData.stock_quantity)) || Number(formData.stock_quantity) < 0) {
+      setFormError('Enter a valid stock quantity.');
+      return;
+    }
+
+    try {
+      setCreating(true);
+      const created = await createProduct({
+        sku: formData.sku.trim(),
+        name: formData.name.trim(),
+        category: formData.category,
+        description: formData.description.trim(),
+        price: Number(formData.price).toFixed(2),
+        stock_quantity: Number(formData.stock_quantity),
+        active: true,
+      });
+      setProducts((prev) => [created, ...prev]);
+      setFormData({
+        sku: '',
+        name: '',
+        category: 'new_phone',
+        description: '',
+        price: '',
+        stock_quantity: '0',
+      });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Unable to create inventory item');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-        <h1 className="text-2xl font-black text-text-dark uppercase tracking-tight">Inventory Management</h1>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div className="card" style={{ padding: 24 }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>Inventory Management</h1>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '4px 0 0' }}>Live inventory from backend products</p>
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {kpis.map(kpi => <KpiCard key={kpi.label} data={kpi} />)}
+      {user.role === 'Admin' && (
+        <form onSubmit={handleAddInventoryItem} className="card" style={{ padding: 16 }}>
+          <h3 style={{ margin: '0 0 12px', color: 'var(--text-primary)', fontWeight: 800 }}>Add Inventory Item</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input className="form-input" placeholder="SKU *" value={formData.sku} onChange={(e) => setFormData((p) => ({ ...p, sku: e.target.value }))} />
+            <input className="form-input" placeholder="Product Name *" value={formData.name} onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))} />
+            <select className="form-input" value={formData.category} onChange={(e) => setFormData((p) => ({ ...p, category: e.target.value as NonNullable<ApiProduct['category']> }))}>
+              <option value="new_phone">New Phone</option>
+              <option value="used_phone">Used Phone</option>
+              <option value="accessories">Accessories</option>
+              <option value="services">Services</option>
+            </select>
+            <input className="form-input" placeholder="Description" value={formData.description} onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))} />
+            <input className="form-input" type="number" min="0" step="0.01" placeholder="Price *" value={formData.price} onChange={(e) => setFormData((p) => ({ ...p, price: e.target.value }))} />
+            <input className="form-input" type="number" min="0" step="1" placeholder="Stock Quantity *" value={formData.stock_quantity} onChange={(e) => setFormData((p) => ({ ...p, stock_quantity: e.target.value }))} />
+          </div>
+          {formError && <p style={{ color: 'var(--color-error-600)', margin: '8px 0 0' }}>{formError}</p>}
+          <button className="btn btn-primary" style={{ marginTop: 12 }} type="submit" disabled={creating}>
+            {creating ? 'Creating...' : '+ Add Inventory Item'}
+          </button>
+        </form>
+      )}
+
+      {user.role !== 'Admin' && (
+        <p style={{ color: 'var(--text-secondary)' }}>Inventory items can only be added by Admin.</p>
+      )}
+
+      {loading && <p style={{ color: 'var(--text-secondary)' }}>Loading inventory...</p>}
+      {error && <p style={{ color: 'var(--color-error-600)' }}>{error}</p>}
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="card" style={{ padding: 16 }}>
+          <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', fontWeight: 700 }}>Products</p>
+          <p style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: 'var(--text-primary)' }}>{filtered.length}</p>
+        </div>
+        <div className="card" style={{ padding: 16 }}>
+          <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', fontWeight: 700 }}>Total Units</p>
+          <p style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: 'var(--text-primary)' }}>{totalStock.toLocaleString()}</p>
+        </div>
+        <div className="card" style={{ padding: 16 }}>
+          <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', fontWeight: 700 }}>Low Stock (&lt;5)</p>
+          <p style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: 'var(--text-primary)' }}>{lowStock}</p>
+        </div>
+        <div className="card" style={{ padding: 16 }}>
+          <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', fontWeight: 700 }}>Inventory Value</p>
+          <p style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: 'var(--text-primary)' }}>Rs {Math.round(inventoryValue).toLocaleString()}</p>
+        </div>
+      </div>
+
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <div style={{ padding: 16, borderBottom: '1px solid var(--border-color)' }}>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, sku or description"
+            className="form-input"
+            style={{ maxWidth: 420 }}
+          />
         </div>
 
-        <div className="bg-surface rounded-2xl shadow-sm border border-secondary/20 overflow-hidden">
-            <div className="p-4 border-b border-secondary/20 flex flex-col md:flex-row gap-4 justify-between items-center">
-                <div className="flex items-center gap-2">
-                    {categories.map(cat => (
-                        <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-4 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${selectedCategory === cat ? 'bg-primary text-white' : 'bg-background text-text-secondary hover:text-text-dark'}`}>{cat}</button>
-                    ))}
-                </div>
-                <div className="flex items-center gap-2">
-                    <select value={selectedStore} onChange={e => setSelectedStore(e.target.value)} disabled={user.role === 'Staff'} className="w-48 bg-background border-none rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary">
-                        {user.role === 'Admin' && <option value="All">All Stores</option>}
-                        {mockStores.filter(s => user.role === 'Admin' || user.assignedStoreId === s.id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    {user.role === 'Admin' && <>
-                        <input type="file" ref={importFileRef} onChange={handleImport} accept=".csv" className="hidden" />
-                        <button onClick={() => importFileRef.current?.click()} className="p-2 bg-background rounded-lg text-text-secondary hover:text-primary"><span className="material-icons text-base">upload</span></button>
-                        <button onClick={handleExport} className="p-2 bg-background rounded-lg text-text-secondary hover:text-primary"><span className="material-icons text-base">download</span></button>
-                    </>}
-                </div>
-            </div>
-
-            <div className="overflow-x-auto max-h-[calc(100vh-450px)]">
-                <table className="w-full text-left text-sm">
-                    <thead className="sticky top-0 bg-background text-[10px] font-bold text-text-secondary uppercase tracking-widest">
-                        <tr>
-                            <th className="px-4 py-3">Product</th>
-                            <th className="px-4 py-3">Category</th>
-                            {selectedStore === 'All' && <th className="px-4 py-3">Store</th>}
-                            <th className="px-4 py-3 text-right">Selling Price</th>
-                            <th className="px-4 py-3 text-center">Stock</th>
-                            <th className="px-4 py-3 text-center">Status</th>
-                            <th className="px-4 py-3 text-center">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-secondary/20">
-                        {displayData.map(item => {
-                            const status = getStatus(item.quantity, item.minStockLevel);
-                            return (
-                                <tr key={item.stockId} className="hover:bg-background">
-                                    <td className="px-4 py-2"><div className="flex items-center gap-3"><img src={item.image} alt={item.name} className="w-9 h-9 rounded-md object-cover bg-background" /><div><p className="font-bold text-text-dark text-xs">{item.name}</p><p className="text-[10px] text-text-secondary font-mono">{item.barcode}</p></div></div></td>
-                                    <td className="px-4 py-2 text-xs text-text-secondary">{item.category}</td>
-                                    {selectedStore === 'All' && <td className="px-4 py-2 text-xs font-bold text-text-secondary">{item.storeName}</td>}
-                                    <td className="px-4 py-2 text-right font-bold text-primary text-xs">₹{item.sellingPrice.toLocaleString()}</td>
-                                    {/* FIX: Conditionally call handleStockAdjustment and disable buttons when storeId is unavailable to prevent runtime errors. */}
-                                    <td className="px-4 py-2"><div className="flex items-center justify-center gap-1.5"><button onClick={() => item.storeId && handleStockAdjustment(item.stockId, -1, item.id, item.storeId)} disabled={!item.storeId} className="w-5 h-5 rounded bg-background text-text-secondary font-bold text-xs hover:bg-secondary/20 disabled:opacity-50">-</button><span className="w-8 text-center font-bold">{item.quantity}</span><button onClick={() => item.storeId && handleStockAdjustment(item.stockId, 1, item.id, item.storeId)} disabled={!item.storeId} className="w-5 h-5 rounded bg-background text-text-secondary font-bold text-xs hover:bg-secondary/20 disabled:opacity-50">+</button></div></td>
-                                    <td className="px-4 py-2 text-center"><span className={`px-2 py-1 rounded text-[9px] font-bold uppercase ${status.color}`}>{status.label}</span></td>
-                                    <td className="px-4 py-2 text-center"><button onClick={(e) => { e.stopPropagation(); navigate(`/pos?barcode=${item.barcode}`); }} className="p-1 rounded bg-background text-text-secondary hover:bg-primary hover:text-white text-[10px]"><span className="material-icons text-sm">point_of_sale</span></button></td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead style={{ background: 'var(--bg-secondary)', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 10 }}>
+            <tr>
+              <th style={{ padding: '14px 16px', textAlign: 'left' }}>SKU</th>
+              <th style={{ padding: '14px 16px', textAlign: 'left' }}>Product</th>
+              <th style={{ padding: '14px 16px', textAlign: 'right' }}>Price</th>
+              <th style={{ padding: '14px 16px', textAlign: 'center' }}>Stock</th>
+              <th style={{ padding: '14px 16px', textAlign: 'center' }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((p) => (
+              <tr key={p.id} style={{ borderTop: '1px solid var(--border-color)' }}>
+                <td style={{ padding: '14px 16px', fontFamily: 'Courier New, monospace', fontSize: 12, color: 'var(--text-primary)' }}>{p.sku}</td>
+                <td style={{ padding: '14px 16px' }}>
+                  <div>
+                    <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-primary)' }}>{p.name}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>{p.description || '-'}</p>
+                  </div>
+                </td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>Rs {Number(p.price).toLocaleString()}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'center', fontWeight: 800, color: 'var(--text-primary)' }}>{p.stock_quantity}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                  <span style={{
+                    display: 'inline-block',
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    background: p.stock_quantity < 5 ? 'var(--color-warning-100)' : 'var(--color-success-100)',
+                    color: p.stock_quantity < 5 ? 'var(--color-warning-600)' : 'var(--color-success-600)',
+                  }}>
+                    {p.stock_quantity < 5 ? 'Low Stock' : 'In Stock'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            {!loading && filtered.length === 0 && (
+              <tr>
+                <td colSpan={5} style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontStyle: 'italic' }}>No inventory items found</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };

@@ -1,125 +1,254 @@
-import React, { useState } from 'react';
-import { CartItem, PaymentMethod } from '../types';
+﻿import React, { useEffect, useMemo, useState } from 'react';
+import { PaymentMethod } from '../types';
+import {
+  createCustomer,
+  createSale,
+  listCustomers,
+  listProducts,
+  type ApiCustomer,
+  type ApiProduct,
+} from '../services/api';
 import './POS.css';
 
+type PosProduct = {
+  id: string;
+  backendId: number;
+  name: string;
+  brand: string;
+  model: string;
+  retailPrice: number;
+  barcode: string;
+  stockQuantity: number;
+  category: 'New Phones' | 'Used Phones' | 'Accessories' | 'Services';
+  avatarIcon: string;
+  avatarColor: string;
+};
+
+type PosCartItem = PosProduct & {
+  cartQuantity: number;
+  itemDiscount: number;
+};
+
+const categories = [
+  { id: 'new-phones', label: 'New Phones', icon: 'NP' },
+  { id: 'used-phones', label: 'Used Phones', icon: 'UP' },
+  { id: 'accessories', label: 'Accessories', icon: 'AC' },
+  { id: 'services', label: 'Services', icon: 'SV' },
+];
+
+const categorizeProduct = (product: ApiProduct): PosProduct['category'] => {
+  const category = (product as ApiProduct & { category?: string }).category;
+  if (category === 'used_phone') return 'Used Phones';
+  if (category === 'accessories') return 'Accessories';
+  if (category === 'services') return 'Services';
+  return 'New Phones';
+};
+
+const getCategoryIcon = (category: PosProduct['category']): string => {
+  if (category === 'Used Phones') return 'smartphone';
+  if (category === 'Accessories') return 'headphones';
+  if (category === 'Services') return 'build_circle';
+  return 'phone_iphone';
+};
+
+const avatarColors = ['pos-avatar-teal', 'pos-avatar-blue', 'pos-avatar-orange', 'pos-avatar-pink'];
+const pickAvatarColor = (text: string): string => {
+  const key = text || 'default';
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash + key.charCodeAt(i)) % avatarColors.length;
+  }
+  return avatarColors[hash];
+};
+
+const mapProduct = (product: ApiProduct): PosProduct => {
+  const category = categorizeProduct(product);
+  return {
+    id: String(product.id),
+    backendId: product.id,
+    name: product.name,
+    brand: product.name.split(' ')[0] || 'Generic',
+    model: product.sku || 'N/A',
+    retailPrice: Number(product.price),
+    barcode: product.sku,
+    stockQuantity: product.stock_quantity,
+    category,
+    avatarIcon: getCategoryIcon(category),
+    avatarColor: pickAvatarColor(`${product.sku}-${product.name}`),
+  };
+};
+
 const POS: React.FC = () => {
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<PosCartItem[]>([]);
+  const [products, setProducts] = useState<PosProduct[]>([]);
+  const [customers, setCustomers] = useState<ApiCustomer[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('new-phones');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
+  const [currentStore, setCurrentStore] = useState('Main Branch');
   const [exchangeCredit, setExchangeCredit] = useState(0);
   const [discount, setDiscount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState('');
 
-  // Mock products database
-  const products = [
-    { id: '1', name: 'iPhone 15 Pro', brand: 'Apple', model: 'A3093', storage: '256GB', color: 'Black', retailPrice: 129999, barcode: 'IPHONE15PRO001', category: 'New Phones', image: '📱' },
-    { id: '2', name: 'Samsung Galaxy S24', brand: 'Samsung', model: 'SM-S920B', storage: '256GB', color: 'Gray', retailPrice: 79999, barcode: 'SAMS24001', category: 'New Phones', image: '📱' },
-    { id: '3', name: 'iPhone 13', brand: 'Apple', model: 'A2632', storage: '128GB', color: 'Blue', retailPrice: 59999, barcode: 'IPHONE13001', category: 'Used Phones', image: '📱' },
-    { id: '4', name: 'Phone Case', brand: 'Generic', retailPrice: 499, barcode: 'CASE001', category: 'Accessories', image: '🎁' },
-    { id: '5', name: 'Screen Protector', brand: 'Generic', retailPrice: 299, barcode: 'SCREEN001', category: 'Accessories', image: '🎁' },
-    { id: '6', name: 'USB-C Cable', brand: 'Generic', retailPrice: 399, barcode: 'CABLE001', category: 'Accessories', image: '🎁' },
-    { id: '7', name: 'Screen Repair Service', brand: 'Service', retailPrice: 2000, barcode: 'SERVICE001', category: 'Services', image: '🔧' },
-  ];
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [productData, customerData] = await Promise.all([listProducts(), listCustomers()]);
+        setProducts(productData.filter((p) => p.active).map(mapProduct));
+        setCustomers(customerData);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load POS data');
+      }
+    };
 
-  const categories = [
-    { id: 'new-phones', label: 'New Phones', icon: '📱' },
-    { id: 'used-phones', label: 'Used Phones', icon: '⏱' },
-    { id: 'accessories', label: 'Accessories', icon: '🎁' },
-    { id: 'services', label: 'Services', icon: '🔧' },
-  ];
+    void load();
+  }, []);
 
-  const filteredProducts = products.filter(p => {
-    const matchCategory = selectedCategory === 'all' || 
-      (selectedCategory === 'new-phones' && p.category === 'New Phones') ||
-      (selectedCategory === 'used-phones' && p.category === 'Used Phones') ||
-      (selectedCategory === 'accessories' && p.category === 'Accessories') ||
-      (selectedCategory === 'services' && p.category === 'Services');
-    
-    const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.barcode.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    return matchCategory && matchSearch;
-  });
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      const matchCategory = selectedCategory === 'all' ||
+        (selectedCategory === 'new-phones' && p.category === 'New Phones') ||
+        (selectedCategory === 'used-phones' && p.category === 'Used Phones') ||
+        (selectedCategory === 'accessories' && p.category === 'Accessories') ||
+        (selectedCategory === 'services' && p.category === 'Services');
 
-  const addToCart = (product: any) => {
-    const existingItem = cart.find(item => item.id === product.id);
-    if (existingItem) {
-      setCart(cart.map(item =>
-        item.id === product.id
-          ? { ...item, cartQuantity: item.cartQuantity + 1 }
-          : item
-      ));
-    } else {
-      setCart([...cart, { ...product as CartItem, cartQuantity: 1, itemDiscount: 0, storeId: '1' }]);
+      const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.barcode.toLowerCase().includes(searchQuery.toLowerCase());
+
+      return matchCategory && matchSearch;
+    });
+  }, [products, searchQuery, selectedCategory]);
+
+  const suggestedProducts = useMemo(() => {
+    const list = filteredProducts.slice();
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list.sort((a, b) => {
+        const aStarts = a.name.toLowerCase().startsWith(q) || a.barcode.toLowerCase().startsWith(q) ? 1 : 0;
+        const bStarts = b.name.toLowerCase().startsWith(q) || b.barcode.toLowerCase().startsWith(q) ? 1 : 0;
+        if (aStarts !== bStarts) return bStarts - aStarts;
+        return b.stockQuantity - a.stockQuantity;
+      });
+      return list.slice(0, 6);
     }
+    list.sort((a, b) => b.stockQuantity - a.stockQuantity);
+    return list.slice(0, 6);
+  }, [filteredProducts, searchQuery]);
+
+  const addToCart = (product: PosProduct) => {
+    const existingItem = cart.find((item) => item.id === product.id);
+    if (existingItem) {
+      setCart((prev) => prev.map((item) =>
+        item.id === product.id ? { ...item, cartQuantity: item.cartQuantity + 1 } : item
+      ));
+      return;
+    }
+
+    setCart((prev) => [...prev, { ...product, cartQuantity: 1, itemDiscount: 0 }]);
   };
 
   const removeFromCart = (productId: string) => {
-    setCart(cart.filter(item => item.id !== productId));
+    setCart((prev) => prev.filter((item) => item.id !== productId));
   };
 
   const updateQuantity = (productId: string, quantity: number) => {
     if (quantity <= 0) {
       removeFromCart(productId);
-    } else {
-      setCart(cart.map(item =>
-        item.id === productId ? { ...item, cartQuantity: quantity } : item
-      ));
+      return;
     }
+
+    setCart((prev) => prev.map((item) =>
+      item.id === productId ? { ...item, cartQuantity: quantity } : item
+    ));
   };
 
-  const subtotal = cart.reduce((sum, item) => sum + ((item.retailPrice || 0) * item.cartQuantity) - item.itemDiscount, 0);
+  const subtotal = cart.reduce((sum, item) => sum + (item.retailPrice * item.cartQuantity) - item.itemDiscount, 0);
   const tax = Math.round(subtotal * 0.18);
-  const total = subtotal + tax - discount + exchangeCredit;
+  const total = Math.max(0, subtotal + tax - discount + exchangeCredit);
+
+  const findOrCreateCustomer = async (): Promise<number | null> => {
+    const name = customerName.trim();
+    const phone = customerPhone.trim();
+
+    if (!name && !phone) return null;
+
+    const existing = customers.find((c) =>
+      (phone && c.phone === phone) || (name && c.name.toLowerCase() === name.toLowerCase())
+    );
+
+    if (existing) return existing.id;
+
+    if (!name) return null;
+
+    const created = await createCustomer({ name, phone, email: '' });
+    setCustomers((prev) => [created, ...prev]);
+    return created.id;
+  };
 
   const handleProcessSale = async () => {
     if (cart.length === 0) {
       alert('Cart is empty');
       return;
     }
-    
+
     setIsProcessing(true);
-    // Simulate processing
-    setTimeout(() => {
-      alert(`Sale processed! Total: ₹${total}`);
+    setError('');
+
+    try {
+      const customerId = await findOrCreateCustomer();
+      await createSale({
+        customer: customerId,
+        notes: `POS checkout | store=${currentStore} | payment=${paymentMethod} | discount=${discount} | exchange=${exchangeCredit}`,
+        items: cart.map((item) => ({
+          product: item.backendId,
+          quantity: item.cartQuantity,
+          unit_price: item.retailPrice.toFixed(2),
+        })),
+      });
+
+      alert(`Sale processed. Total: Rs ${total.toLocaleString()}`);
       setCart([]);
       setCustomerName('');
       setCustomerPhone('');
       setDiscount(0);
       setExchangeCredit(0);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to process sale';
+      setError(message);
+      alert(message);
+    } finally {
       setIsProcessing(false);
-    }, 1500);
+    }
   };
 
   return (
     <div className="pos-container">
-      {/* Header */}
       <div className="pos-header">
         <div className="store-info">
-          <h2 className="pos-title">💳 POS Terminal</h2>
-          <p className="store-name">Main Branch - Terminal 01</p>
+          <h2 className="pos-title">POS Terminal</h2>
+          <p className="store-name">{currentStore} - Terminal 01</p>
         </div>
+        <select value={currentStore} onChange={(e) => setCurrentStore(e.target.value)} className="input-field" style={{ maxWidth: 180 }}>
+          <option value="Main Branch">Main Branch</option>
+          <option value="Store A">Store A</option>
+          <option value="Store B">Store B</option>
+        </select>
         <div className="pos-time">{new Date().toLocaleTimeString()}</div>
       </div>
 
-      {/* Main Layout */}
+      {error && <p style={{ color: '#dc2626', marginBottom: 12 }}>{error}</p>}
+
       <div className="pos-layout">
-        {/* Panel 1: Product Discovery */}
         <div className="pos-panel product-panel">
           <div className="panel-header">
             <h3>Product Catalog</h3>
           </div>
 
-          {/* Search & Filters */}
           <div className="search-section">
             <div className="barcode-input">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
               <input
                 type="text"
                 placeholder="Barcode or search..."
@@ -131,9 +260,8 @@ const POS: React.FC = () => {
             </div>
           </div>
 
-          {/* Category Tabs */}
           <div className="category-tabs">
-            {categories.map(cat => (
+            {categories.map((cat) => (
               <button
                 key={cat.id}
                 className={`category-tab ${selectedCategory === cat.id ? 'active' : ''}`}
@@ -145,20 +273,35 @@ const POS: React.FC = () => {
             ))}
           </div>
 
-          {/* Products Grid */}
+          <div className="suggestion-strip">
+            <p className="suggestion-title">{searchQuery.trim() ? 'Suggested Matches' : 'Suggested Products'}</p>
+            <div className="suggestion-list">
+              {suggestedProducts.map((product) => (
+                <button key={`suggest-${product.id}`} className="suggestion-chip" onClick={() => addToCart(product)}>
+                  <span className={`material-icons suggestion-icon ${product.avatarColor}`}>{product.avatarIcon}</span>
+                  <span>{product.name}</span>
+                </button>
+              ))}
+              {suggestedProducts.length === 0 && <span className="suggestion-empty">No suggestions</span>}
+            </div>
+          </div>
+
           <div className="products-grid">
             {filteredProducts.length > 0 ? (
-              filteredProducts.map(product => (
+              filteredProducts.map((product) => (
                 <button
                   key={product.id}
                   className="product-card"
                   onClick={() => addToCart(product)}
                 >
-                  <div className="product-image">{product.image}</div>
+                  <div className={`product-image-avatar ${product.avatarColor}`}>
+                    <span className="material-icons">{product.avatarIcon}</span>
+                  </div>
                   <div className="product-info">
                     <h4 className="product-name">{product.name}</h4>
                     <p className="product-model">{product.model}</p>
-                    <p className="product-price">₹{product.retailPrice.toLocaleString()}</p>
+                    <p className="product-model">Stock: {product.stockQuantity}</p>
+                    <p className="product-price">Rs {product.retailPrice.toLocaleString()}</p>
                   </div>
                 </button>
               ))
@@ -168,18 +311,15 @@ const POS: React.FC = () => {
           </div>
         </div>
 
-        {/* Panel 2: Cart & Customer */}
         <div className="pos-panel cart-panel">
           <div className="panel-header">
             <h3>Cart</h3>
             <span className="item-count">{cart.length} items</span>
           </div>
 
-          {/* Customer Details */}
           <div className="customer-section">
             <div className="customer-header">
               <h4>Customer</h4>
-              <button className="link-btn">+ New</button>
             </div>
             <input
               type="text"
@@ -197,62 +337,47 @@ const POS: React.FC = () => {
             />
           </div>
 
-          {/* Cart Items */}
           <div className="cart-items">
             {cart.length > 0 ? (
-              cart.map(item => (
+              cart.map((item) => (
                 <div key={item.id} className="cart-item">
                   <div className="item-details">
                     <h4 className="item-name">{item.name}</h4>
                     <p className="item-code">{item.barcode}</p>
                   </div>
                   <div className="item-quantity">
-                    <button onClick={() => updateQuantity(item.id, item.cartQuantity - 1)}>−</button>
+                    <button onClick={() => updateQuantity(item.id, item.cartQuantity - 1)}>-</button>
                     <input
                       type="number"
                       value={item.cartQuantity}
-                      onChange={(e) => updateQuantity(item.id, parseInt(e.target.value))}
+                      onChange={(e) => updateQuantity(item.id, parseInt(e.target.value, 10) || 0)}
                       className="qty-input"
                     />
                     <button onClick={() => updateQuantity(item.id, item.cartQuantity + 1)}>+</button>
                   </div>
-                  <div className="item-price">₹{((item.retailPrice || 0) * item.cartQuantity).toLocaleString()}</div>
-                  <button className="remove-btn" onClick={() => removeFromCart(item.id)}>✕</button>
+                  <div className="item-price">Rs {(item.retailPrice * item.cartQuantity).toLocaleString()}</div>
+                  <button className="remove-btn" onClick={() => removeFromCart(item.id)}>x</button>
                 </div>
               ))
             ) : (
               <div className="empty-cart">Cart is empty</div>
             )}
           </div>
-
-          {/* Quick Options */}
-          <div className="quick-options">
-            <button className="option-btn">
-              <span>🎁</span>
-              Gift Card
-            </button>
-            <button className="option-btn">
-              <span>🔄</span>
-              Exchange
-            </button>
-          </div>
         </div>
 
-        {/* Panel 3: Payment & Checkout */}
         <div className="pos-panel payment-panel">
           <div className="panel-header">
             <h3>Checkout</h3>
           </div>
 
-          {/* Bill Summary */}
           <div className="bill-summary">
             <div className="summary-row">
               <span>Subtotal</span>
-              <span className="amount">₹{subtotal.toLocaleString()}</span>
+              <span className="amount">Rs {subtotal.toLocaleString()}</span>
             </div>
             <div className="summary-row">
               <span>Tax (18%)</span>
-              <span className="amount">₹{tax.toLocaleString()}</span>
+              <span className="amount">Rs {tax.toLocaleString()}</span>
             </div>
             <div className="summary-row">
               <span>Discount</span>
@@ -260,7 +385,7 @@ const POS: React.FC = () => {
                 <input
                   type="number"
                   value={discount}
-                  onChange={(e) => setDiscount(parseInt(e.target.value) || 0)}
+                  onChange={(e) => setDiscount(parseInt(e.target.value, 10) || 0)}
                   className="input-field"
                 />
               </div>
@@ -271,7 +396,7 @@ const POS: React.FC = () => {
                 <input
                   type="number"
                   value={exchangeCredit}
-                  onChange={(e) => setExchangeCredit(parseInt(e.target.value) || 0)}
+                  onChange={(e) => setExchangeCredit(parseInt(e.target.value, 10) || 0)}
                   className="input-field"
                 />
               </div>
@@ -279,43 +404,36 @@ const POS: React.FC = () => {
             <div className="summary-divider"></div>
             <div className="summary-row grand-total">
               <span>Grand Total</span>
-              <span className="amount">₹{Math.max(0, total).toLocaleString()}</span>
+              <span className="amount">Rs {total.toLocaleString()}</span>
             </div>
           </div>
 
-          {/* Payment Method */}
           <div className="payment-method">
             <h4>Payment Method</h4>
             <div className="method-buttons">
-              {(['Cash', 'Card', 'UPI', 'Bank Transfer'] as PaymentMethod[]).map(method => (
+              {(['Cash', 'Card', 'UPI', 'Bank Transfer'] as PaymentMethod[]).map((method) => (
                 <button
                   key={method}
                   className={`method-btn ${paymentMethod === method ? 'active' : ''}`}
                   onClick={() => setPaymentMethod(method)}
                 >
-                  {method === 'Cash' && '💵'}
-                  {method === 'Card' && '💳'}
-                  {method === 'UPI' && '📱'}
-                  {method === 'Bank Transfer' && '🏦'}
                   {method}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Action Buttons */}
           <div className="action-buttons">
-            <button className="btn btn-secondary">Cancel</button>
+            <button className="btn btn-secondary" onClick={() => setCart([])}>Cancel</button>
             <button
               className="btn btn-primary process-btn"
               onClick={handleProcessSale}
               disabled={cart.length === 0 || isProcessing}
             >
-              {isProcessing ? 'Processing...' : 'PROCESS SALE'}
+              {isProcessing ? 'Processing...' : 'Process Sale'}
             </button>
           </div>
 
-          {/* Quick Stats */}
           <div className="quick-stats">
             <div className="stat">
               <span className="stat-label">Items</span>
@@ -323,7 +441,7 @@ const POS: React.FC = () => {
             </div>
             <div className="stat">
               <span className="stat-label">Total</span>
-              <span className="stat-value">₹{Math.max(0, total).toLocaleString()}</span>
+              <span className="stat-value">Rs {total.toLocaleString()}</span>
             </div>
           </div>
         </div>
@@ -333,3 +451,4 @@ const POS: React.FC = () => {
 };
 
 export default POS;
+

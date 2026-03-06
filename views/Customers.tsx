@@ -1,21 +1,77 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { createCustomer, listCustomers, listSales, type ApiCustomer, type ApiSale } from '../services/api';
+import { User } from '../types';
 import './Customers.css';
 
-const Customers: React.FC = () => {
+type CustomerWithStats = ApiCustomer & {
+  totalSpent: number;
+  purchases: number;
+  lastVisit: string;
+};
+
+interface CustomersProps {
+  user: User;
+}
+
+const Customers: React.FC<CustomersProps> = ({ user }) => {
+  const [searchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
+  const [customers, setCustomers] = useState<ApiCustomer[]>([]);
+  const [sales, setSales] = useState<ApiSale[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [formData, setFormData] = useState({
+    name: '',
+    phone: '',
+    email: '',
+  });
 
-  const customers = [
-    { id: 'CUST001', name: 'Mohit Verma', phone: '9876543210', email: 'mohit@example.com', store: 'Main Branch', totalSpent: 125000, purchases: 8, lastVisit: '2024-03-02' },
-    { id: 'CUST002', name: 'Anjali Gupta', phone: '9876543211', email: 'anjali@example.com', store: 'Branch 2', totalSpent: 85000, purchases: 5, lastVisit: '2024-02-28' },
-    { id: 'CUST003', name: 'Vikram Singh', phone: '9876543212', email: 'vikram@example.com', store: 'Main Branch', totalSpent: 250000, purchases: 15, lastVisit: '2024-03-01' },
-    { id: 'CUST004', name: 'Priya Sharma', phone: '9876543213', email: 'priya@example.com', store: 'Branch 3', totalSpent: 45000, purchases: 3, lastVisit: '2024-02-25' },
-    { id: 'CUST005', name: 'Arjun Patel', phone: '9876543214', email: 'arjun@example.com', store: 'Main Branch', totalSpent: 180000, purchases: 12, lastVisit: '2024-03-02' },
-  ];
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        const [customerData, salesData] = await Promise.all([listCustomers(), listSales()]);
+        setCustomers(customerData);
+        setSales(salesData);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load customers');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const filteredCustomers = customers.filter(c =>
+    void load();
+  }, []);
+
+  useEffect(() => {
+    setSearchTerm(searchParams.get('q') || '');
+  }, [searchParams]);
+
+  const customerStats = useMemo<CustomerWithStats[]>(() => {
+    return customers.map((customer) => {
+      const customerSales = sales.filter((sale) => sale.customer === customer.id);
+      const totalSpent = customerSales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0);
+      const lastVisit = customerSales.length > 0
+        ? customerSales[0].sold_at.slice(0, 10)
+        : customer.created_at.slice(0, 10);
+
+      return {
+        ...customer,
+        totalSpent,
+        purchases: customerSales.length,
+        lastVisit,
+      };
+    });
+  }, [customers, sales]);
+
+  const filteredCustomers = customerStats.filter((c) =>
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.phone.includes(searchTerm) ||
-    c.id.includes(searchTerm)
+    String(c.id).includes(searchTerm)
   );
 
   const getTierBadge = (spent: number) => {
@@ -25,14 +81,62 @@ const Customers: React.FC = () => {
     return { label: 'Regular', color: '#6b7280' };
   };
 
+  const handleAddCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError('');
+    if (!formData.name.trim()) {
+      setFormError('Customer name is required.');
+      return;
+    }
+
+    try {
+      setCreating(true);
+      const created = await createCustomer({
+        name: formData.name.trim(),
+        phone: formData.phone.trim(),
+        email: formData.email.trim(),
+      });
+      setCustomers((prev) => [created, ...prev]);
+      setFormData({ name: '', phone: '', email: '' });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Unable to create customer');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const totalRevenue = customerStats.reduce((sum, c) => sum + c.totalSpent, 0);
+
   return (
     <div className="customers-container">
       <div className="customers-header">
-        <h1>🧑‍💼 Customer Management</h1>
-        <button className="btn btn-primary">+ Add Customer</button>
+        <h1>Customer Management</h1>
       </div>
 
-      {/* Search Section */}
+      {user.role === 'Admin' && (
+        <form onSubmit={handleAddCustomer} className="card" style={{ marginBottom: 16, padding: 16 }}>
+          <h3 style={{ marginTop: 0 }}>Add Customer</h3>
+          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+            <input className="form-input" placeholder="Customer Name *" value={formData.name} onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))} />
+            <input className="form-input" placeholder="Phone" value={formData.phone} onChange={(e) => setFormData((p) => ({ ...p, phone: e.target.value }))} />
+            <input className="form-input" placeholder="Email" value={formData.email} onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))} />
+          </div>
+          {formError && <p style={{ color: 'var(--color-error-600)', margin: '8px 0 0' }}>{formError}</p>}
+          <button className="btn btn-primary" type="submit" style={{ marginTop: 12 }} disabled={creating}>
+            {creating ? 'Creating...' : '+ Add Customer'}
+          </button>
+        </form>
+      )}
+
+      {user.role !== 'Admin' && (
+        <p style={{ marginBottom: 16, color: 'var(--text-secondary)' }}>
+          Customers can only be added by Admin.
+        </p>
+      )}
+
+      {loading && <p>Loading customers...</p>}
+      {error && <p style={{ color: 'var(--color-error-600)' }}>{error}</p>}
+
       <div className="search-section">
         <input
           type="text"
@@ -44,7 +148,6 @@ const Customers: React.FC = () => {
         <span className="search-count">{filteredCustomers.length} results</span>
       </div>
 
-      {/* Customers Table */}
       <div className="table-wrapper">
         <table className="customers-table">
           <thead>
@@ -52,16 +155,14 @@ const Customers: React.FC = () => {
               <th>Name</th>
               <th>Phone</th>
               <th>Email</th>
-              <th>Store</th>
               <th>Tier</th>
               <th>Total Spent</th>
               <th>Purchases</th>
               <th>Last Visit</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filteredCustomers.map(customer => {
+            {filteredCustomers.map((customer) => {
               const tier = getTierBadge(customer.totalSpent);
               return (
                 <tr key={customer.id}>
@@ -69,25 +170,19 @@ const Customers: React.FC = () => {
                     <div className="avatar">{customer.name.charAt(0)}</div>
                     <div className="name-info">
                       <strong>{customer.name}</strong>
-                      <span className="cust-id">{customer.id}</span>
+                      <span className="cust-id">CUST{String(customer.id).padStart(4, '0')}</span>
                     </div>
                   </td>
-                  <td className="phone-cell">{customer.phone}</td>
-                  <td className="email-cell">{customer.email}</td>
-                  <td className="store-cell">{customer.store}</td>
+                  <td className="phone-cell">{customer.phone || '-'}</td>
+                  <td className="email-cell">{customer.email || '-'}</td>
                   <td>
                     <span className="tier-badge" style={{ borderColor: tier.color }}>
                       {tier.label}
                     </span>
                   </td>
-                  <td className="amount-cell">₹{customer.totalSpent.toLocaleString()}</td>
+                  <td className="amount-cell">Rs {customer.totalSpent.toLocaleString()}</td>
                   <td className="count-cell"><strong>{customer.purchases}</strong></td>
                   <td className="date-cell">{customer.lastVisit}</td>
-                  <td className="actions-cell">
-                    <button className="action-btn" title="View Profile">👁️</button>
-                    <button className="action-btn" title="Transaction History">📜</button>
-                    <button className="action-btn" title="Send Message">💬</button>
-                  </td>
                 </tr>
               );
             })}
@@ -95,26 +190,25 @@ const Customers: React.FC = () => {
         </table>
       </div>
 
-      {/* Summary Stats */}
       <div className="summary-cards">
         <div className="summary-card">
           <h4>Total Customers</h4>
-          <p className="value">{customers.length}</p>
+          <p className="value">{customerStats.length}</p>
           <span className="subtitle">Active customers</span>
         </div>
         <div className="summary-card">
           <h4>Gold Tier</h4>
-          <p className="value">{customers.filter(c => c.totalSpent >= 200000).length}</p>
+          <p className="value">{customerStats.filter((c) => c.totalSpent >= 200000).length}</p>
           <span className="subtitle">High value</span>
         </div>
         <div className="summary-card">
           <h4>Total Revenue</h4>
-          <p className="value">₹{(customers.reduce((sum, c) => sum + c.totalSpent, 0) / 100000).toFixed(1)}L</p>
+          <p className="value">Rs {(totalRevenue / 100000).toFixed(1)}L</p>
           <span className="subtitle">From customers</span>
         </div>
         <div className="summary-card">
           <h4>Avg. Spent</h4>
-          <p className="value">₹{Math.round(customers.reduce((sum, c) => sum + c.totalSpent, 0) / customers.length).toLocaleString()}</p>
+          <p className="value">Rs {customerStats.length ? Math.round(totalRevenue / customerStats.length).toLocaleString() : 0}</p>
           <span className="subtitle">Per customer</span>
         </div>
       </div>
