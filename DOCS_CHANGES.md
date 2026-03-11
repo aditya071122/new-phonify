@@ -1,212 +1,309 @@
-# Project Change Log (DRF Backend + Frontend Integration)
+# Project Change Log
 
-## Latest Update: Admin + Employee Credentials
+## Current Status
 
-### Backend-side changes
+- Frontend and backend are connected.
+- PostgreSQL is used through the Django backend configuration.
+- Role-based access is implemented.
+- `Manager` now has the same access level as `Admin` across frontend and backend.
+- Store-based filtering is implemented across the main modules and report downloads.
+- Admin and Manager have `Dashboard`, `Reports`, and `POS`.
+- Staff is operation-focused.
+- POS now writes required sale fields to backend and validates stock and payment split.
+- Employee edit now supports updating login username and password.
+- Add/edit/delete actions now show success popup confirmation in the main CRUD modules.
+- Header search and notification buttons have been removed.
+- Latest backend migration required:
+  - `backend/api/migrations/0010_buyback_cash_amount_buyback_exchange_amount_and_more.py`
 
-- Added `Employee.auth_user` relation to Django auth user:
-  - `backend/api/models.py`
-  - migration: `backend/api/migrations/0008_employee_auth_user.py`
-- Updated employee serializer to support credential-based employee creation:
-  - accepts optional `username` and `password` on `POST /api/employees/`
-  - creates linked Django auth user when both are provided
-  - returns `login_username` in employee response
-  - file: `backend/api/serializers.py`
-- Enforced role/auth rules:
-  - only Django superuser is treated as `Admin` at login
-  - employee-created credentials are always non-admin (`Staff`)
-  - only admin can create/update/delete employee records/credentials
-  - file: `backend/api/views.py`
-- Removed seeded `admin` auth user through migration:
-  - `backend/api/migrations/0009_remove_seeded_admin_user.py`
-  - use your own single backend-created superuser for admin login
-- Added backend docs for:
-  - creating admin (`python manage.py createsuperuser`)
-  - admin panel URL (`/admin/`)
-  - employee credential payload behavior
-  - file: `backend/README.md`
-- Added admin-only brief report download API:
-  - `GET /api/reports/brief/download/`
-  - supports `month=YYYY-MM` or `from=YYYY-MM-DD&to=YYYY-MM-DD`
-  - returns CSV summary report
-  - file: `backend/api/views.py`, `backend/api/urls.py`
+## Frontend Changes
 
-### Frontend-side changes
+### Navigation and role flow
 
-- Updated employee API types:
-  - `CreateEmployeePayload` now supports optional `username`, `password`
-  - `ApiEmployee` now includes optional `login_username`
-  - file: `services/api.ts`
-- Updated Employee Management UI:
-  - Add Employee now has a dedicated credentials section with `username` and `password` fields
-  - only Admin sees the credential creation form
-  - Employee table now shows `Login` column from backend (`login_username`)
-  - file: `views/Employees.tsx`
-- Updated Login screen:
-  - removed manual role selector (Admin/Staff)
-  - authentication is based on username/password only, role comes from backend
-  - file: `views/Login.tsx`
-- Updated Customer Management:
-  - added dedicated Add Customer section (form-based, admin-only)
-  - removed prompt-based add flow
-  - file: `views/Customers.tsx`
-- Updated Inventory Management:
-  - added dedicated Add Inventory Item section (form-based, admin-only)
-  - connected form to backend `POST /api/products/`
-  - file: `views/Inventory.tsx`
-- API service updates:
-  - added `createProduct()` and `CreateProductPayload`
-  - file: `services/api.ts`
-- Reports UI updates:
-  - Financial Dashboard now includes admin-only “Brief Report Download” section
-  - supports month-based or day-range filter and CSV download
-  - file: `views/FinancialDashboard.tsx`
+- `Admin` and `Manager` land on `Dashboard`.
+- `Staff` lands on `POS Terminal`.
+- Sidebar access is now:
+  - `Admin` / `Manager`: `Dashboard`, `Reports`, `POS Terminal`, `Expenses`, `Payments`, `Customers`, `Inventory`, `Employees`
+  - `Staff`: `POS Terminal`, `Sales`, `Buyback`, `Repairs`, `Customers`
+- Top header `search` and `notification` controls were removed.
 
-## Quick Split: What Changed Where
+Files:
 
-### Backend-side changes
+- `App.tsx`
+- `components/Sidebar.tsx`
+- `components/Header.tsx`
+- `components/Header.css`
+- `types.ts`
 
-- Created a new Django REST Framework project inside `backend/`.
-- Added API app with models, serializers, viewsets, and URL routing.
-- Added health endpoint and CRUD APIs for customers, products, and sales.
-- Switched database configuration to PostgreSQL (env variable driven).
-- Added backend dependency updates and backend setup documentation.
+### Operational modules
 
-### Frontend-side changes
+The following modules use backend data and support add/edit/delete behavior in the UI where applicable:
 
-- Added a centralized API layer in `services/api.ts`.
-- Connected `Customers` page to backend APIs (list + create customer, sales-based stats).
-- Connected `POS` page to backend APIs (products/customers load + create sale checkout).
-- Connected `Dashboard` page to backend APIs (KPI values + recent sales).
-- Added Vite dev proxy for `/api` to backend server.
+- `Sales`
+- `Buyback`
+- `Repairs`
+- `Inventory`
+- `Customers`
+- `Employees`
+- `Expenses`
+- `Payments`
 
-## 1) Backend Created
+Success popups were added after completed add/edit/delete actions in the main CRUD modules.
 
-The following Django REST Framework backend was added under `backend/`:
+Files:
 
-- `backend/manage.py`
-- `backend/backend/settings.py`
-- `backend/backend/urls.py`
-- `backend/backend/asgi.py`
-- `backend/backend/wsgi.py`
-- `backend/backend/__init__.py`
-- `backend/api/apps.py`
-- `backend/api/models.py`
-- `backend/api/serializers.py`
-- `backend/api/views.py`
-- `backend/api/urls.py`
-- `backend/api/admin.py`
-- `backend/api/migrations/__init__.py`
-- `backend/api/__init__.py`
-- `backend/requirements.txt`
-- `backend/README.md`
-- `backend/.env.example`
+- `views/Sales.tsx`
+- `views/Buyback.tsx`
+- `views/Repairs.tsx`
+- `views/Inventory.tsx`
+- `views/Customers.tsx`
+- `views/Employees.tsx`
+- `views/Expenses.tsx`
+- `views/Payments.tsx`
 
-## 2) Backend Features Added
+### POS updates
 
-- DRF app `api` registered in Django settings.
-- Models added:
-  - `Customer`
-  - `Product`
-  - `Sale`
-  - `SaleItem`
-- Serializers added for all models.
-- CRUD ViewSets added:
-  - `CustomerViewSet`
-  - `ProductViewSet`
-  - `SaleViewSet`
-- Health endpoint added:
-  - `GET /api/health/`
-- Router endpoints added:
-  - `GET|POST /api/customers/`
-  - `GET|PUT|PATCH|DELETE /api/customers/<id>/`
-  - `GET|POST /api/products/`
-  - `GET|PUT|PATCH|DELETE /api/products/<id>/`
-  - `GET|POST /api/sales/`
-  - `GET|PUT|PATCH|DELETE /api/sales/<id>/`
+- POS store selector now uses real stores.
+- POS saves:
+  - `store_ref`
+  - `job_no`
+  - `ic_number`
+  - `cash_amount`
+  - `online_amount`
+  - `exchange_amount`
+  - `exchange_model`
+  - `got_amount`
+  - `gift`
+  - `salesperson_name`
+- POS validates stock before checkout.
+- POS reduces payable total by exchange credit.
+- POS updates product stock in UI after successful checkout.
 
-## 3) Database Migration to PostgreSQL
+Files:
 
-`backend/backend/settings.py` was updated from SQLite to PostgreSQL using environment variables:
+- `views/POS.tsx`
+- `views/POS.css`
 
-- `POSTGRES_DB`
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
-- `POSTGRES_HOST`
-- `POSTGRES_PORT`
-- `DJANGO_SECRET_KEY`
-- `DJANGO_DEBUG`
-- `DJANGO_ALLOWED_HOSTS`
+### Reports UI
 
-Dependency added:
+- Admin and Manager have a dedicated report center.
+- Report downloads are available section-wise.
+- CSV download buttons exist for:
+  - `overall`
+  - `sales`
+  - `accessories`
+  - `buybacks`
+  - `repairs`
+  - `expenses`
+  - `payments`
+  - `inventory`
+  - `customers`
+- Report download respects selected date range/month and selected store filter.
 
-- `psycopg[binary]>=3.2,<4.0`
+File:
 
-## 4) Frontend Connected to Backend
+- `views/FinancialDashboard.tsx`
 
-### New API service file
+### API client updates
+
+- `services/api.ts` includes CRUD helpers for:
+  - stores
+  - customers
+  - employees
+  - products
+  - sales
+  - buybacks
+  - repairs
+  - expenses
+  - payments
+- Added report download helper.
+- Auth user type now supports `Admin`, `Manager`, and `Staff`.
+
+File:
 
 - `services/api.ts`
 
-This file centralizes all API calls:
+## Backend Changes
 
-- `listCustomers()`
-- `createCustomer()`
-- `listProducts()`
-- `listSales()`
-- `createSale()`
+### Auth and role rules
 
-### Updated frontend screens
+- Django `superuser` logs in as `Admin`.
+- Employee login linked to an employee record with role `Manager` logs in as `Manager`.
+- Other employee-created login users log in as `Staff`.
+- Backend privileged actions now allow both `Admin` and `Manager`.
 
-- `views/Customers.tsx`
-  - Replaced static customer list with backend data.
-  - Loads customers + sales from API and derives:
-    - total spent
-    - purchases count
-    - last visit
-  - Add Customer button now creates customer via API.
+Files:
 
-- `views/POS.tsx`
-  - Replaced mock products with products from backend API.
-  - Loads customers for lookup/reuse.
-  - Checkout now sends sale to backend using `POST /api/sales/`.
-  - If typed customer does not exist, creates customer first.
+- `backend/api/views.py`
+- `backend/api/serializers.py`
 
-- `views/Dashboard.tsx`
-  - Loads sales/customers/products from backend.
-  - KPIs now use live API-derived values:
-    - today revenue
-    - monthly revenue
-    - total orders
-    - low stock items
-    - total customers
-    - average order value
-  - Recent sales table now populated from backend sales.
+### Employee credential support
 
-### Dev proxy update
+- `POST /api/employees/` supports optional employee login creation with:
+  - `username`
+  - `password`
+- `PATCH /api/employees/<id>/` now supports:
+  - updating `username`
+  - updating `password`
+  - creating login credentials for an employee who did not already have them
+- Employee API response includes `login_username`.
 
-- `vite.config.ts` updated to proxy `/api` requests to backend:
-  - default: `http://127.0.0.1:8000`
-  - override with `VITE_BACKEND_URL`
+Files:
 
-## 5) Current Status / Remaining Manual Steps
+- `backend/api/serializers.py`
 
-To run successfully on your machine, these still need to be done locally:
+### Store and relationship support
 
-1. Install backend dependencies:
-   - `pip install -r backend/requirements.txt`
-2. Create PostgreSQL DB/user and set env variables.
-3. Run backend migrations:
-   - `python manage.py makemigrations`
-   - `python manage.py migrate`
-4. Run backend:
-   - `python manage.py runserver`
-5. Install frontend dependencies:
-   - `npm install`
-6. Run frontend:
-   - `npm run dev`
+- `Store` relationships are used across:
+  - customers
+  - employees
+  - products
+  - sales
+  - buybacks
+  - repairs
+  - expenses
+  - payment entries
 
-## 6) Notes
+Main file:
 
-- Frontend build was not executed successfully yet because `node_modules` is not installed (`vite` missing).
-- Migration files for Django models are not generated yet until `makemigrations` is run.
+- `backend/api/models.py`
+
+### Sale/report-oriented backend fields
+
+To support sheet/report format, fields exist on:
+
+- `Sale`
+  - `job_no`
+  - `ic_number`
+  - `cash_amount`
+  - `online_amount`
+  - `exchange_amount`
+  - `exchange_model`
+  - `got_amount`
+  - `gift`
+  - `salesperson_name`
+
+- `Buyback`
+  - `job_no`
+  - `ic_number`
+  - `cash_amount`
+  - `online_amount`
+  - `exchange_amount`
+  - `exchange_model`
+
+- `RepairTicket`
+  - `problem`
+  - `parts_charge`
+  - `got_amount`
+  - `in_cash`
+  - `in_online`
+  - `out_cash`
+  - `out_online`
+
+- `Expense`
+  - `reason`
+  - `out_cash`
+  - `out_online`
+  - `expense_date`
+  - `store_ref`
+
+- `PaymentEntry`
+  - `entry_type`
+  - `dealer_name`
+  - `cash_amount`
+  - `online_amount`
+  - `entry_date`
+  - `store_ref`
+
+Files:
+
+- `backend/api/models.py`
+- `backend/api/serializers.py`
+
+### Inventory and sale processing
+
+- Sale serializer now exposes the newer sale fields.
+- Sale create/update validates stock.
+- Sale create/update deducts and restores product stock correctly for non-service items.
+
+File:
+
+- `backend/api/serializers.py`
+
+### API endpoints
+
+Main endpoints:
+
+- `/api/health/`
+- `/api/auth/login/`
+- `/api/auth/logout/`
+- `/api/stores/`
+- `/api/customers/`
+- `/api/employees/`
+- `/api/products/`
+- `/api/store-inventory/`
+- `/api/sales/`
+- `/api/buybacks/`
+- `/api/repairs/`
+- `/api/expenses/`
+- `/api/payments/`
+- `/api/reports/brief/download/`
+
+Files:
+
+- `backend/api/urls.py`
+- `backend/api/views.py`
+
+### Report export behavior
+
+Privileged CSV exports support these sections:
+
+- `overall`
+- `sales`
+- `accessories`
+- `buybacks`
+- `repairs`
+- `expenses`
+- `payments`
+- `inventory`
+- `customers`
+
+Exports support:
+
+- store filtering
+- day range filtering
+- month filtering
+
+## Migrations
+
+Important migration sequence:
+
+- `0008_employee_auth_user.py`
+- `0009_remove_seeded_admin_user.py`
+- `0010_buyback_cash_amount_buyback_exchange_amount_and_more.py`
+
+## What You Need To Run
+
+### Backend
+
+```bash
+cd backend
+python manage.py migrate
+python manage.py runserver
+```
+
+### Frontend
+
+```bash
+npm run dev
+```
+
+## Validation Already Performed
+
+- `python manage.py check` passed
+- `npm run build` passed
+
+## Important Note
+
+- Report output currently supports module-wise CSV export.
+- If you want the exact screenshot layout as a print-ready sheet or PDF, that is still a separate formatting/export task.

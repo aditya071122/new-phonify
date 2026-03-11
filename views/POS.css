@@ -380,6 +380,12 @@
   background-color: var(--bg-primary);
 }
 
+.pos-inline-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-sm);
+}
+
 .cart-items {
   flex: 1;
   overflow-y: auto;

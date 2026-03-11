@@ -91,6 +91,15 @@ class Sale(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales')
     store_ref = models.ForeignKey(Store, null=True, blank=True, on_delete=models.SET_NULL, related_name='sales')
     salesperson = models.ForeignKey(Employee, null=True, blank=True, on_delete=models.SET_NULL, related_name='sales')
+    job_no = models.CharField(max_length=40, blank=True)
+    ic_number = models.CharField(max_length=60, blank=True)
+    cash_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    online_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    exchange_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    exchange_model = models.CharField(max_length=150, blank=True)
+    got_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    gift = models.CharField(max_length=150, blank=True)
+    salesperson_name = models.CharField(max_length=120, blank=True)
     sold_at = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)
 
@@ -131,6 +140,12 @@ class Buyback(models.Model):
     color = models.CharField(max_length=50, blank=True)
     customer = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.SET_NULL, related_name='buybacks')
     store_ref = models.ForeignKey(Store, null=True, blank=True, on_delete=models.SET_NULL, related_name='buybacks')
+    job_no = models.CharField(max_length=40, blank=True)
+    ic_number = models.CharField(max_length=60, blank=True)
+    cash_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    online_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    exchange_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    exchange_model = models.CharField(max_length=150, blank=True)
     condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default='Good')
     market_value = models.DecimalField(max_digits=10, decimal_places=2)
     negotiated_price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -160,11 +175,18 @@ class RepairTicket(models.Model):
     customer = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.SET_NULL, related_name='repair_tickets')
     store_ref = models.ForeignKey(Store, null=True, blank=True, on_delete=models.SET_NULL, related_name='repair_tickets')
     device_model = models.CharField(max_length=150)
+    problem = models.TextField(blank=True)
     technician_name = models.CharField(max_length=120, blank=True)
     technician = models.ForeignKey(Employee, null=True, blank=True, on_delete=models.SET_NULL, related_name='repair_tickets')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     parts = models.JSONField(default=list, blank=True)
+    parts_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     labor_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    got_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    in_cash = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    in_online = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    out_cash = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    out_online = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     warranty = models.CharField(max_length=20, choices=WARRANTY_CHOICES, default='3 months')
     estimated_completion = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
@@ -172,3 +194,35 @@ class RepairTicket(models.Model):
 
     def __str__(self):
         return self.ticket_no
+
+
+class Expense(models.Model):
+    store_ref = models.ForeignKey(Store, null=True, blank=True, on_delete=models.SET_NULL, related_name='expenses')
+    reason = models.CharField(max_length=180)
+    out_cash = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    out_online = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    expense_date = models.DateField()
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.reason
+
+
+class PaymentEntry(models.Model):
+    ENTRY_TYPE_CHOICES = [
+        ('in', 'Pending In'),
+        ('out', 'Payments Out'),
+    ]
+
+    store_ref = models.ForeignKey(Store, null=True, blank=True, on_delete=models.SET_NULL, related_name='payment_entries')
+    entry_type = models.CharField(max_length=10, choices=ENTRY_TYPE_CHOICES)
+    dealer_name = models.CharField(max_length=180)
+    cash_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    online_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    entry_date = models.DateField()
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.entry_type}: {self.dealer_name}'

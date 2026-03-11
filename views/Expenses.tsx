@@ -1,123 +1,258 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { User, isPrivilegedUser } from '../types';
+import {
+  createExpense,
+  deleteExpense,
+  listExpenses,
+  listStores,
+  updateExpense,
+  type ApiExpense,
+  type ApiStore,
+} from '../services/api';
 
-import React from 'react';
-import KpiCard from '../components/KpiCard';
+const Expenses: React.FC<{ user: User }> = ({ user }) => {
+  const fieldStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6 };
+  const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' };
+  const [searchParams] = useSearchParams();
+  const q = (searchParams.get('q') || '').toLowerCase();
+  const storeFilter = searchParams.get('store') || 'All Stores';
+  const [expenses, setExpenses] = useState<ApiExpense[]>([]);
+  const [stores, setStores] = useState<ApiStore[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null);
+  const [form, setForm] = useState({
+    store_ref: '',
+    reason: '',
+    out_cash: '0',
+    out_online: '0',
+    expense_date: new Date().toISOString().slice(0, 10),
+    notes: '',
+  });
+  const [editForm, setEditForm] = useState({
+    store_ref: '',
+    reason: '',
+    out_cash: '0',
+    out_online: '0',
+    expense_date: new Date().toISOString().slice(0, 10),
+    notes: '',
+  });
 
-const Expenses: React.FC = () => {
-  const kpis = [
-    { label: 'Total Expenses (Today)', value: '$1,240.50', trend: '+12%', trendLabel: 'vs yesterday', icon: 'money_off', color: '#ef4444', bgLight: 'rgba(239, 68, 68, 0.1)' },
-    { label: 'Cash Flow Out', value: '$450.00', trendLabel: 'Physical cash spent', icon: 'payments', color: '#2563eb', bgLight: 'rgba(37, 99, 235, 0.1)' },
-    { label: 'Online Transfers', value: '$790.50', trendLabel: 'Bank & digital payments', icon: 'account_balance', color: '#8b5cf6', bgLight: 'rgba(139, 92, 246, 0.1)' },
-  ];
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        const [expenseData, storeData] = await Promise.all([listExpenses(), listStores()]);
+        setExpenses(expenseData);
+        setStores(storeData.filter((store) => store.is_active));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load expenses');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const transactions = [
-    { id: '#EXP-802', time: '10:45 AM', reason: 'Shop Electricity Bill', category: 'Utilities', method: 'Online', amount: '- $120.00' },
-    { id: '#EXP-801', time: '09:30 AM', reason: 'Morning Coffee & Snacks', category: 'Food & Bev', method: 'Cash', amount: '- $15.50' },
-    { id: '#EXP-800', time: '09:15 AM', reason: 'Cleaning Supplies', category: 'Maintenance', method: 'Cash', amount: '- $42.00' },
-    { id: '#EXP-799', time: 'Yesterday', reason: 'New Display Units (Partial)', category: 'Inventory', method: 'Online', amount: '- $650.00' },
-    { id: '#EXP-798', time: 'Yesterday', reason: 'Employee Bonus (Cash)', category: 'Salary', method: 'Cash', amount: '- $100.00' },
-  ];
+    void load();
+  }, []);
+
+  const storeById = useMemo(() => {
+    const map = new Map<number, ApiStore>();
+    stores.forEach((store) => map.set(store.id, store));
+    return map;
+  }, [stores]);
+
+  const filteredExpenses = useMemo(() => expenses.filter((expense) => {
+    const matchesText = !q || expense.reason.toLowerCase().includes(q) || (expense.notes || '').toLowerCase().includes(q);
+    const storeName = storeById.get(expense.store_ref || -1)?.name || '';
+    const matchesStore = storeFilter === 'All Stores' || storeName === storeFilter;
+    return matchesText && matchesStore;
+  }), [expenses, q, storeFilter, storeById]);
+
+  const totals = useMemo(() => ({
+    total: filteredExpenses.reduce((sum, entry) => sum + Number(entry.out_cash || 0) + Number(entry.out_online || 0), 0),
+    cash: filteredExpenses.reduce((sum, entry) => sum + Number(entry.out_cash || 0), 0),
+    online: filteredExpenses.reduce((sum, entry) => sum + Number(entry.out_online || 0), 0),
+  }), [filteredExpenses]);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!form.reason.trim()) {
+      setError('Expense reason is required.');
+      return;
+    }
+    try {
+      setSaving(true);
+      setError('');
+      const created = await createExpense({
+        store_ref: form.store_ref ? Number(form.store_ref) : null,
+        reason: form.reason.trim(),
+        out_cash: Number(form.out_cash || 0).toFixed(2),
+        out_online: Number(form.out_online || 0).toFixed(2),
+        expense_date: form.expense_date,
+        notes: form.notes.trim(),
+      });
+      setExpenses((prev) => [created, ...prev]);
+      setForm({
+        store_ref: '',
+        reason: '',
+        out_cash: '0',
+        out_online: '0',
+        expense_date: new Date().toISOString().slice(0, 10),
+        notes: '',
+      });
+      alert('Expense added successfully.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save expense');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleStartEdit = (expense: ApiExpense) => {
+    setEditingExpenseId(expense.id);
+    setEditForm({
+      store_ref: expense.store_ref ? String(expense.store_ref) : '',
+      reason: expense.reason,
+      out_cash: String(expense.out_cash),
+      out_online: String(expense.out_online),
+      expense_date: expense.expense_date,
+      notes: expense.notes || '',
+    });
+  };
+
+  const handleEdit = async (expense: ApiExpense) => {
+    try {
+      setUpdating(true);
+      const updated = await updateExpense(expense.id, {
+        store_ref: editForm.store_ref ? Number(editForm.store_ref) : null,
+        reason: editForm.reason,
+        out_cash: Number(editForm.out_cash || expense.out_cash).toFixed(2),
+        out_online: Number(editForm.out_online || expense.out_online).toFixed(2),
+        expense_date: editForm.expense_date,
+        notes: editForm.notes,
+      });
+      setExpenses((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)));
+      setEditingExpenseId(null);
+      alert('Expense updated successfully.');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update expense');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleDelete = async (expense: ApiExpense) => {
+    if (!window.confirm(`Delete expense ${expense.reason}?`)) return;
+    try {
+      await deleteExpense(expense.id);
+      setExpenses((prev) => prev.filter((entry) => entry.id !== expense.id));
+      alert('Expense deleted successfully.');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete expense');
+    }
+  };
 
   return (
-    <div className="space-y-8 animate-in zoom-in-95 duration-500">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Expense Management</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Monitor and control your store's operational costs.</p>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div className="card" style={{ padding: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: 'var(--text-primary)' }}>Expense Management</h1>
+        <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)' }}>Real expense records synced to backend and filtered by store.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {kpis.map((kpi, i) => <KpiCard key={i} data={kpi} />)}
-      </div>
-
-      <div className="bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-slate-100 dark:border-dark-border overflow-hidden transition-colors duration-200">
-        <div className="p-4 border-b border-slate-100 dark:border-dark-border bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-            <span className="material-icons text-blue-600 dark:text-blue-400">add_circle</span>
-            Quick Expense Entry
-          </h3>
-          <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest bg-white dark:bg-slate-900 border border-slate-200 dark:border-dark-border px-2 py-1 rounded">Today: Oct 24, 2023</span>
-        </div>
-        <div className="p-6">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-end">
-            <div className="lg:col-span-5">
-              <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Expense Reason</label>
-              <div className="relative">
-                <span className="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 dark:text-slate-600 text-lg">description</span>
-                <input type="text" placeholder="e.g. Shop supplies..." className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-900 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 dark:text-slate-200" />
-              </div>
-            </div>
-            <div className="lg:col-span-3">
-              <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Cash Out</label>
-              <div className="relative group">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 font-bold">$</span>
-                <input type="text" placeholder="0.00" className="w-full pl-7 pr-4 py-2.5 bg-slate-50 dark:bg-slate-900 border-none rounded-xl text-sm font-bold text-red-500 dark:text-red-400 focus:ring-2 focus:ring-red-500/20" />
-              </div>
-            </div>
-            <div className="lg:col-span-3">
-              <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Online Out</label>
-              <div className="relative group">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 font-bold">$</span>
-                <input type="text" placeholder="0.00" className="w-full pl-7 pr-4 py-2.5 bg-slate-50 dark:bg-slate-900 border-none rounded-xl text-sm font-bold text-red-500 dark:text-red-400 focus:ring-2 focus:ring-red-500/20" />
-              </div>
-            </div>
-            <div className="lg:col-span-1">
-              <button className="w-full h-[42px] bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all active:scale-95">
-                <span className="material-icons">check</span>
-              </button>
-            </div>
+      {isPrivilegedUser(user) && (
+        <form onSubmit={handleSubmit} className="card" style={{ padding: 16 }}>
+          <h3 style={{ margin: '0 0 12px', color: 'var(--text-primary)', fontWeight: 800 }}>Add Expense</h3>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            <div style={fieldStyle}><label style={labelStyle}>Store</label><select className="form-input" value={form.store_ref} onChange={(e) => setForm((prev) => ({ ...prev, store_ref: e.target.value }))}>
+              <option value="">Select Store</option>
+              {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+            </select></div>
+            <div style={fieldStyle}><label style={labelStyle}>Expense Reason</label><input className="form-input" placeholder="Reason" value={form.reason} onChange={(e) => setForm((prev) => ({ ...prev, reason: e.target.value }))} /></div>
+            <div style={fieldStyle}><label style={labelStyle}>Out Cash</label><input className="form-input" type="number" min="0" step="0.01" placeholder="Out Cash" value={form.out_cash} onChange={(e) => setForm((prev) => ({ ...prev, out_cash: e.target.value }))} /></div>
+            <div style={fieldStyle}><label style={labelStyle}>Out Online</label><input className="form-input" type="number" min="0" step="0.01" placeholder="Out Online" value={form.out_online} onChange={(e) => setForm((prev) => ({ ...prev, out_online: e.target.value }))} /></div>
+            <div style={fieldStyle}><label style={labelStyle}>Expense Date</label><input className="form-input" type="date" value={form.expense_date} onChange={(e) => setForm((prev) => ({ ...prev, expense_date: e.target.value }))} /></div>
           </div>
-        </div>
+          <div style={{ ...fieldStyle, marginTop: 12 }}><label style={labelStyle}>Notes</label><textarea className="form-input" style={{ minHeight: 80 }} placeholder="Notes" value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} /></div>
+          <button className="btn btn-primary" type="submit" style={{ marginTop: 12 }} disabled={saving}>{saving ? 'Saving...' : '+ Add Expense'}</button>
+        </form>
+      )}
+
+      {isPrivilegedUser(user) && editingExpenseId !== null && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const expense = expenses.find((entry) => entry.id === editingExpenseId);
+            if (expense) {
+              void handleEdit(expense);
+            }
+          }}
+          className="card"
+          style={{ padding: 16 }}
+        >
+          <h3 style={{ margin: '0 0 12px', color: 'var(--text-primary)', fontWeight: 800 }}>Edit Expense</h3>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            <div style={fieldStyle}><label style={labelStyle}>Store</label><select className="form-input" value={editForm.store_ref} onChange={(e) => setEditForm((prev) => ({ ...prev, store_ref: e.target.value }))}>
+              <option value="">Select Store</option>
+              {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+            </select></div>
+            <div style={fieldStyle}><label style={labelStyle}>Expense Reason</label><input className="form-input" placeholder="Reason" value={editForm.reason} onChange={(e) => setEditForm((prev) => ({ ...prev, reason: e.target.value }))} /></div>
+            <div style={fieldStyle}><label style={labelStyle}>Out Cash</label><input className="form-input" type="number" min="0" step="0.01" placeholder="Out Cash" value={editForm.out_cash} onChange={(e) => setEditForm((prev) => ({ ...prev, out_cash: e.target.value }))} /></div>
+            <div style={fieldStyle}><label style={labelStyle}>Out Online</label><input className="form-input" type="number" min="0" step="0.01" placeholder="Out Online" value={editForm.out_online} onChange={(e) => setEditForm((prev) => ({ ...prev, out_online: e.target.value }))} /></div>
+            <div style={fieldStyle}><label style={labelStyle}>Expense Date</label><input className="form-input" type="date" value={editForm.expense_date} onChange={(e) => setEditForm((prev) => ({ ...prev, expense_date: e.target.value }))} /></div>
+          </div>
+          <div style={{ ...fieldStyle, marginTop: 12 }}><label style={labelStyle}>Notes</label><textarea className="form-input" style={{ minHeight: 80 }} placeholder="Notes" value={editForm.notes} onChange={(e) => setEditForm((prev) => ({ ...prev, notes: e.target.value }))} /></div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button className="btn btn-primary" type="submit" disabled={updating}>{updating ? 'Saving...' : 'Save Changes'}</button>
+            <button className="btn btn-secondary" type="button" onClick={() => setEditingExpenseId(null)}>Cancel</button>
+          </div>
+        </form>
+      )}
+
+      {loading && <p style={{ color: 'var(--text-secondary)' }}>Loading expenses...</p>}
+      {error && <p style={{ color: 'var(--color-error-600)' }}>{error}</p>}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="card" style={{ padding: 16 }}><p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', fontWeight: 700 }}>Total Expense</p><p style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: 'var(--text-primary)' }}>Rs {Math.round(totals.total).toLocaleString()}</p></div>
+        <div className="card" style={{ padding: 16 }}><p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', fontWeight: 700 }}>Cash Out</p><p style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: 'var(--text-primary)' }}>Rs {Math.round(totals.cash).toLocaleString()}</p></div>
+        <div className="card" style={{ padding: 16 }}><p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', fontWeight: 700 }}>Online Out</p><p style={{ fontSize: 28, fontWeight: 800, marginTop: 4, color: 'var(--text-primary)' }}>Rs {Math.round(totals.online).toLocaleString()}</p></div>
       </div>
 
-      <div className="bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-slate-100 dark:border-dark-border overflow-hidden transition-colors duration-200">
-        <div className="p-6 border-b border-slate-100 dark:border-dark-border flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Recent Transactions</h3>
-          <div className="relative w-full md:w-64">
-            <span className="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm">search</span>
-            <input type="text" placeholder="Search reason..." className="w-full pl-9 pr-4 py-1.5 bg-slate-50 dark:bg-slate-900 border-none rounded-lg text-xs dark:text-slate-200" />
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50/50 dark:bg-slate-800/50 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-dark-border">
-              <tr>
-                <th className="px-6 py-4">ID & Time</th>
-                <th className="px-6 py-4">Reason</th>
-                <th className="px-6 py-4">Category</th>
-                <th className="px-6 py-4">Method</th>
-                <th className="px-6 py-4 text-right">Amount</th>
-                <th className="px-6 py-4 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-dark-border">
-              {transactions.map((t, i) => (
-                <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{t.id}</p>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500">{t.time}</p>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">{t.reason}</td>
-                  <td className="px-6 py-4">
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">
-                      {t.category}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                      <span className="material-icons text-sm">{t.method === 'Online' ? 'account_balance' : 'payments'}</span>
-                      {t.method}
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead style={{ background: 'var(--bg-secondary)', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 10 }}>
+            <tr>
+              <th style={{ padding: '14px 16px', textAlign: 'left' }}>Store</th>
+              <th style={{ padding: '14px 16px', textAlign: 'left' }}>Reason</th>
+              <th style={{ padding: '14px 16px', textAlign: 'right' }}>Cash</th>
+              <th style={{ padding: '14px 16px', textAlign: 'right' }}>Online</th>
+              <th style={{ padding: '14px 16px', textAlign: 'left' }}>Date</th>
+              <th style={{ padding: '14px 16px', textAlign: 'center' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredExpenses.map((expense) => (
+              <tr key={expense.id} style={{ borderTop: '1px solid var(--border-color)' }}>
+                <td style={{ padding: '14px 16px', color: 'var(--text-primary)' }}>{storeById.get(expense.store_ref || -1)?.name || '-'}</td>
+                <td style={{ padding: '14px 16px', color: 'var(--text-primary)' }}>{expense.reason}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', color: 'var(--text-primary)' }}>Rs {Number(expense.out_cash).toLocaleString()}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', color: 'var(--text-primary)' }}>Rs {Number(expense.out_online).toLocaleString()}</td>
+                <td style={{ padding: '14px 16px', color: 'var(--text-secondary)' }}>{expense.expense_date}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                  {isPrivilegedUser(user) ? (
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                      <button className="btn" style={{ padding: '6px 10px' }} onClick={() => handleStartEdit(expense)}>Edit</button>
+                      <button className="btn" style={{ padding: '6px 10px', background: 'var(--color-error-100)', color: 'var(--color-error-700)' }} onClick={() => void handleDelete(expense)}>Delete</button>
                     </div>
-                  </td>
-                  <td className="px-6 py-4 text-right font-bold text-red-500 dark:text-red-400">{t.amount}</td>
-                  <td className="px-6 py-4 text-center">
-                    <button className="text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 transition-colors">
-                      <span className="material-icons text-lg">delete</span>
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  ) : '-'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

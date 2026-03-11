@@ -5,6 +5,8 @@ from .views import (
     BuybackViewSet,
     CustomerViewSet,
     EmployeeViewSet,
+    ExpenseViewSet,
+    PaymentEntryViewSet,
     ProductViewSet,
     RepairTicketViewSet,
     SaleViewSet,
@@ -25,6 +27,8 @@ router.register(r'store-inventory', StoreInventoryViewSet)
 router.register(r'sales', SaleViewSet)
 router.register(r'buybacks', BuybackViewSet)
 router.register(r'repairs', RepairTicketViewSet)
+router.register(r'expenses', ExpenseViewSet)
+router.register(r'payments', PaymentEntryViewSet)
 
 urlpatterns = [
     path('health/', health_check, name='health-check'),

@@ -1,12 +1,14 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { PaymentMethod } from '../types';
 import {
   createCustomer,
   createSale,
   listCustomers,
   listProducts,
+  listStores,
   type ApiCustomer,
   type ApiProduct,
+  type ApiStore,
 } from '../services/api';
 import './POS.css';
 
@@ -78,27 +80,49 @@ const mapProduct = (product: ApiProduct): PosProduct => {
   };
 };
 
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  marginBottom: 6,
+  fontSize: 12,
+  fontWeight: 700,
+  color: 'var(--text-secondary)',
+};
+
 const POS: React.FC = () => {
   const [cart, setCart] = useState<PosCartItem[]>([]);
   const [products, setProducts] = useState<PosProduct[]>([]);
   const [customers, setCustomers] = useState<ApiCustomer[]>([]);
+  const [stores, setStores] = useState<ApiStore[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('new-phones');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
-  const [currentStore, setCurrentStore] = useState('Main Branch');
+  const [currentStoreId, setCurrentStoreId] = useState('');
   const [exchangeCredit, setExchangeCredit] = useState(0);
   const [discount, setDiscount] = useState(0);
+  const [jobNo, setJobNo] = useState('');
+  const [icNumber, setIcNumber] = useState('');
+  const [salespersonName, setSalespersonName] = useState('');
+  const [exchangeModel, setExchangeModel] = useState('');
+  const [gift, setGift] = useState('');
+  const [cashAmount, setCashAmount] = useState('0.00');
+  const [onlineAmount, setOnlineAmount] = useState('0.00');
+  const [gotAmount, setGotAmount] = useState('0.00');
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [productData, customerData] = await Promise.all([listProducts(), listCustomers()]);
+        const [productData, customerData, storeData] = await Promise.all([listProducts(), listCustomers(), listStores()]);
         setProducts(productData.filter((p) => p.active).map(mapProduct));
         setCustomers(customerData);
+        const activeStores = storeData.filter((store) => store.is_active);
+        setStores(activeStores);
+        if (activeStores.length > 0) {
+          setCurrentStoreId(String(activeStores[0].id));
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load POS data');
       }
@@ -107,16 +131,41 @@ const POS: React.FC = () => {
     void load();
   }, []);
 
+  const currentStore = useMemo(
+    () => stores.find((store) => String(store.id) === currentStoreId) || null,
+    [stores, currentStoreId]
+  );
+
+  const subtotal = useMemo(
+    () => cart.reduce((sum, item) => sum + (item.retailPrice * item.cartQuantity) - item.itemDiscount, 0),
+    [cart]
+  );
+  const tax = useMemo(() => Math.round(subtotal * 0.18), [subtotal]);
+  const total = useMemo(() => Math.max(0, subtotal + tax - discount - exchangeCredit), [subtotal, tax, discount, exchangeCredit]);
+
+  useEffect(() => {
+    const normalized = total.toFixed(2);
+    if (paymentMethod === 'Cash') {
+      setCashAmount(normalized);
+      setOnlineAmount('0.00');
+      setGotAmount(normalized);
+      return;
+    }
+    setCashAmount('0.00');
+    setOnlineAmount(normalized);
+    setGotAmount(normalized);
+  }, [paymentMethod, total]);
+
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
-      const matchCategory = selectedCategory === 'all' ||
-        (selectedCategory === 'new-phones' && p.category === 'New Phones') ||
-        (selectedCategory === 'used-phones' && p.category === 'Used Phones') ||
-        (selectedCategory === 'accessories' && p.category === 'Accessories') ||
-        (selectedCategory === 'services' && p.category === 'Services');
+      const matchCategory = selectedCategory === 'all'
+        || (selectedCategory === 'new-phones' && p.category === 'New Phones')
+        || (selectedCategory === 'used-phones' && p.category === 'Used Phones')
+        || (selectedCategory === 'accessories' && p.category === 'Accessories')
+        || (selectedCategory === 'services' && p.category === 'Services');
 
-      const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.barcode.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase())
+        || p.barcode.toLowerCase().includes(searchQuery.toLowerCase());
 
       return matchCategory && matchSearch;
     });
@@ -139,15 +188,26 @@ const POS: React.FC = () => {
   }, [filteredProducts, searchQuery]);
 
   const addToCart = (product: PosProduct) => {
+    if (product.category !== 'Services' && product.stockQuantity < 1) {
+      setError(`No stock available for ${product.name}.`);
+      return;
+    }
+
     const existingItem = cart.find((item) => item.id === product.id);
     if (existingItem) {
-      setCart((prev) => prev.map((item) =>
+      if (product.category !== 'Services' && existingItem.cartQuantity >= product.stockQuantity) {
+        setError(`Only ${product.stockQuantity} unit(s) available for ${product.name}.`);
+        return;
+      }
+      setCart((prev) => prev.map((item) => (
         item.id === product.id ? { ...item, cartQuantity: item.cartQuantity + 1 } : item
-      ));
+      )));
+      setError('');
       return;
     }
 
     setCart((prev) => [...prev, { ...product, cartQuantity: 1, itemDiscount: 0 }]);
+    setError('');
   };
 
   const removeFromCart = (productId: string) => {
@@ -160,14 +220,18 @@ const POS: React.FC = () => {
       return;
     }
 
-    setCart((prev) => prev.map((item) =>
-      item.id === productId ? { ...item, cartQuantity: quantity } : item
-    ));
-  };
+    const currentItem = cart.find((item) => item.id === productId);
+    if (!currentItem) return;
+    if (currentItem.category !== 'Services' && quantity > currentItem.stockQuantity) {
+      setError(`Only ${currentItem.stockQuantity} unit(s) available for ${currentItem.name}.`);
+      return;
+    }
 
-  const subtotal = cart.reduce((sum, item) => sum + (item.retailPrice * item.cartQuantity) - item.itemDiscount, 0);
-  const tax = Math.round(subtotal * 0.18);
-  const total = Math.max(0, subtotal + tax - discount + exchangeCredit);
+    setCart((prev) => prev.map((item) => (
+      item.id === productId ? { ...item, cartQuantity: quantity } : item
+    )));
+    setError('');
+  };
 
   const findOrCreateCustomer = async (): Promise<number | null> => {
     const name = customerName.trim();
@@ -175,15 +239,19 @@ const POS: React.FC = () => {
 
     if (!name && !phone) return null;
 
-    const existing = customers.find((c) =>
+    const existing = customers.find((c) => (
       (phone && c.phone === phone) || (name && c.name.toLowerCase() === name.toLowerCase())
-    );
+    ));
 
     if (existing) return existing.id;
-
     if (!name) return null;
 
-    const created = await createCustomer({ name, phone, email: '' });
+    const created = await createCustomer({
+      name,
+      phone,
+      email: '',
+      store_ref: currentStore ? currentStore.id : null,
+    });
     setCustomers((prev) => [created, ...prev]);
     return created.id;
   };
@@ -193,15 +261,39 @@ const POS: React.FC = () => {
       alert('Cart is empty');
       return;
     }
+    if (!currentStore) {
+      alert('Select a store before processing the sale.');
+      return;
+    }
 
     setIsProcessing(true);
     setError('');
 
     try {
       const customerId = await findOrCreateCustomer();
+      const cashValue = Number(cashAmount || 0);
+      const onlineValue = Number(onlineAmount || 0);
+      const exchangeValue = Number(exchangeCredit || 0);
+      const gotValue = Number(gotAmount || 0);
+      const paymentTotal = cashValue + onlineValue + exchangeValue;
+
+      if (Math.abs(paymentTotal - total) > 0.01) {
+        throw new Error(`Payment split must match the grand total of Rs ${total.toFixed(2)}.`);
+      }
+
       await createSale({
         customer: customerId,
-        notes: `POS checkout | store=${currentStore} | payment=${paymentMethod} | discount=${discount} | exchange=${exchangeCredit}`,
+        store_ref: currentStore.id,
+        job_no: jobNo.trim(),
+        ic_number: icNumber.trim(),
+        cash_amount: cashValue.toFixed(2),
+        online_amount: onlineValue.toFixed(2),
+        exchange_amount: exchangeValue.toFixed(2),
+        exchange_model: exchangeModel.trim(),
+        got_amount: gotValue.toFixed(2),
+        gift: gift.trim(),
+        salesperson_name: salespersonName.trim(),
+        notes: `POS checkout | payment=${paymentMethod} | discount=${discount.toFixed(2)}`,
         items: cart.map((item) => ({
           product: item.backendId,
           quantity: item.cartQuantity,
@@ -210,11 +302,24 @@ const POS: React.FC = () => {
       });
 
       alert(`Sale processed. Total: Rs ${total.toLocaleString()}`);
+      setProducts((prev) => prev.map((product) => {
+        const cartItem = cart.find((item) => item.backendId === product.backendId);
+        if (!cartItem || product.category === 'Services') return product;
+        return { ...product, stockQuantity: Math.max(0, product.stockQuantity - cartItem.cartQuantity) };
+      }));
       setCart([]);
       setCustomerName('');
       setCustomerPhone('');
       setDiscount(0);
       setExchangeCredit(0);
+      setJobNo('');
+      setIcNumber('');
+      setSalespersonName('');
+      setExchangeModel('');
+      setGift('');
+      setCashAmount('0.00');
+      setOnlineAmount('0.00');
+      setGotAmount('0.00');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to process sale';
       setError(message);
@@ -229,12 +334,13 @@ const POS: React.FC = () => {
       <div className="pos-header">
         <div className="store-info">
           <h2 className="pos-title">POS Terminal</h2>
-          <p className="store-name">{currentStore} - Terminal 01</p>
+          <p className="store-name">{currentStore?.name || 'Select Store'} - Terminal 01</p>
         </div>
-        <select value={currentStore} onChange={(e) => setCurrentStore(e.target.value)} className="input-field" style={{ maxWidth: 180 }}>
-          <option value="Main Branch">Main Branch</option>
-          <option value="Store A">Store A</option>
-          <option value="Store B">Store B</option>
+        <select value={currentStoreId} onChange={(e) => setCurrentStoreId(e.target.value)} className="input-field" style={{ maxWidth: 180, marginBottom: 0 }}>
+          <option value="">Select Store</option>
+          {stores.map((store) => (
+            <option key={store.id} value={store.id}>{store.name}</option>
+          ))}
         </select>
         <div className="pos-time">{new Date().toLocaleTimeString()}</div>
       </div>
@@ -321,6 +427,7 @@ const POS: React.FC = () => {
             <div className="customer-header">
               <h4>Customer</h4>
             </div>
+            <label style={labelStyle}>Customer Name</label>
             <input
               type="text"
               placeholder="Customer Name"
@@ -328,6 +435,7 @@ const POS: React.FC = () => {
               onChange={(e) => setCustomerName(e.target.value)}
               className="input-field"
             />
+            <label style={labelStyle}>Phone Number</label>
             <input
               type="tel"
               placeholder="Phone Number"
@@ -335,6 +443,24 @@ const POS: React.FC = () => {
               onChange={(e) => setCustomerPhone(e.target.value)}
               className="input-field"
             />
+            <div className="pos-inline-grid">
+              <div>
+                <label style={labelStyle}>Job Number</label>
+                <input type="text" placeholder="Job Number" value={jobNo} onChange={(e) => setJobNo(e.target.value)} className="input-field" />
+              </div>
+              <div>
+                <label style={labelStyle}>IC Number</label>
+                <input type="text" placeholder="IC Number" value={icNumber} onChange={(e) => setIcNumber(e.target.value)} className="input-field" />
+              </div>
+              <div>
+                <label style={labelStyle}>Salesman Name</label>
+                <input type="text" placeholder="Salesman Name" value={salespersonName} onChange={(e) => setSalespersonName(e.target.value)} className="input-field" />
+              </div>
+              <div>
+                <label style={labelStyle}>Gift</label>
+                <input type="text" placeholder="Gift" value={gift} onChange={(e) => setGift(e.target.value)} className="input-field" />
+              </div>
+            </div>
           </div>
 
           <div className="cart-items">
@@ -385,7 +511,7 @@ const POS: React.FC = () => {
                 <input
                   type="number"
                   value={discount}
-                  onChange={(e) => setDiscount(parseInt(e.target.value, 10) || 0)}
+                  onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
                   className="input-field"
                 />
               </div>
@@ -396,7 +522,7 @@ const POS: React.FC = () => {
                 <input
                   type="number"
                   value={exchangeCredit}
-                  onChange={(e) => setExchangeCredit(parseInt(e.target.value, 10) || 0)}
+                  onChange={(e) => setExchangeCredit(parseFloat(e.target.value) || 0)}
                   className="input-field"
                 />
               </div>
@@ -420,6 +546,32 @@ const POS: React.FC = () => {
                   {method}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="payment-method">
+            <h4>Sale Details</h4>
+            <div className="pos-inline-grid">
+              <div>
+                <label style={labelStyle}>Cash Amount</label>
+                <input type="number" min="0" step="0.01" value={cashAmount} onChange={(e) => setCashAmount(e.target.value)} className="input-field" />
+              </div>
+              <div>
+                <label style={labelStyle}>Online Amount</label>
+                <input type="number" min="0" step="0.01" value={onlineAmount} onChange={(e) => setOnlineAmount(e.target.value)} className="input-field" />
+              </div>
+              <div>
+                <label style={labelStyle}>Exchange Amount</label>
+                <input type="number" min="0" step="0.01" value={exchangeCredit} onChange={(e) => setExchangeCredit(parseFloat(e.target.value) || 0)} className="input-field" />
+              </div>
+              <div>
+                <label style={labelStyle}>Exchange Model</label>
+                <input type="text" value={exchangeModel} onChange={(e) => setExchangeModel(e.target.value)} className="input-field" placeholder="Exchange Model" />
+              </div>
+              <div>
+                <label style={labelStyle}>Received Amount</label>
+                <input type="number" min="0" step="0.01" value={gotAmount} onChange={(e) => setGotAmount(e.target.value)} className="input-field" />
+              </div>
             </div>
           </div>
 
@@ -451,4 +603,3 @@ const POS: React.FC = () => {
 };
 
 export default POS;
-

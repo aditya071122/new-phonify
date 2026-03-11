@@ -10,7 +10,7 @@ import Inventory from './views/Inventory';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Login from './views/Login';
-import { User } from './types';
+import { User, isPrivilegedUser } from './types';
 import POS from './views/POS';
 import Buyback from './views/Buyback';
 import FinancialDashboard from './views/FinancialDashboard';
@@ -60,6 +60,8 @@ const App: React.FC = () => {
     setUser(null);
   };
 
+  const defaultPath = isPrivilegedUser(user) ? '/dashboard' : '/pos';
+
   return (
     <Router>
       {!user ? (
@@ -86,20 +88,21 @@ const App: React.FC = () => {
             <main style={{ flex: 1, overflow: 'auto', backgroundColor: 'var(--bg-secondary)', padding: '24px' }}>
               <div style={{ maxWidth: '1600px', margin: '0 auto' }}>
                 <Routes>
-                  <Route path="/dashboard" element={<Dashboard user={user} />} />
-                  <Route path="/sales" element={<Sales />} />
+                  <Route path="/dashboard" element={isPrivilegedUser(user) ? <Dashboard user={user} /> : <Navigate to={defaultPath} replace />} />
+                  <Route path="/sales" element={<Sales user={user} />} />
                   <Route path="/pos" element={<POS />} />
-                  <Route path="/buyback" element={<Buyback />} />
-                  <Route path="/inventory" element={<Inventory user={user} />} />
-                  <Route path="/repairs" element={<Repairs />} />
-                  <Route path="/expenses" element={<Expenses />} />
-                  <Route path="/payments" element={<Payments />} />
+                  <Route path="/buyback" element={<Buyback user={user} />} />
+                  <Route path="/inventory" element={isPrivilegedUser(user) ? <Inventory user={user} /> : <Navigate to={defaultPath} replace />} />
+                  <Route path="/repairs" element={<Repairs user={user} />} />
+                  <Route path="/expenses" element={isPrivilegedUser(user) ? <Expenses user={user} /> : <Navigate to={defaultPath} replace />} />
+                  <Route path="/payments" element={isPrivilegedUser(user) ? <Payments user={user} /> : <Navigate to={defaultPath} replace />} />
                   <Route path="/accessories" element={<Accessories />} />
-                  <Route path="/financial" element={<FinancialDashboard user={user} />} />
+                  <Route path="/financial" element={<Navigate to="/reports" replace />} />
+                  <Route path="/reports" element={<FinancialDashboard user={user} />} />
                   <Route path="/customers" element={<Customers user={user} />} />
-                  <Route path="/employees" element={<Employees user={user} />} />
-                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                  <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/employees" element={isPrivilegedUser(user) ? <Employees user={user} /> : <Navigate to={defaultPath} replace />} />
+                  <Route path="/" element={<Navigate to={defaultPath} replace />} />
+                  <Route path="/login" element={<Navigate to={defaultPath} replace />} />
                 </Routes>
               </div>
             </main>

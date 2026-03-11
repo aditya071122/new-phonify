@@ -1,6 +1,6 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { User, Store } from '../types';
+import { Store, User } from '../types';
 import './Header.css';
 
 interface HeaderProps {
@@ -19,15 +19,11 @@ const Header: React.FC<HeaderProps> = ({
   onLogout,
 }) => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [showStoreMenu, setShowStoreMenu] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(document.documentElement.classList.contains('dark'));
 
   const storeMenuRef = useRef<HTMLDivElement>(null);
-  const notificationRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   const stores = [
@@ -37,16 +33,9 @@ const Header: React.FC<HeaderProps> = ({
     { id: 'b', name: 'Store B', type: 'Secondary' as const },
   ];
 
-  const notifications = [
-    { id: '1', message: 'Low stock alert', icon: '!', type: 'warning' },
-    { id: '2', message: 'New repair ticket assigned', icon: 'R', type: 'info' },
-    { id: '3', message: 'Weekly report ready', icon: 'G', type: 'success' },
-  ];
-
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (storeMenuRef.current && !storeMenuRef.current.contains(e.target as Node)) setShowStoreMenu(false);
-      if (notificationRef.current && !notificationRef.current.contains(e.target as Node)) setShowNotifications(false);
       if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setShowUserMenu(false);
     };
 
@@ -63,22 +52,6 @@ const Header: React.FC<HeaderProps> = ({
     observer.observe(root, { attributes: true, attributeFilter: ['class'] });
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    const next = searchParams.get('q') || '';
-    if (next !== searchQuery) setSearchQuery(next);
-  }, [searchParams]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const params = new URLSearchParams(searchParams);
-      if (searchQuery.trim()) params.set('q', searchQuery.trim());
-      else params.delete('q');
-      setSearchParams(params, { replace: true });
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
 
   const toggleDarkMode = () => {
     const root = document.documentElement;
@@ -126,30 +99,6 @@ const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        <div className={`search-container ${isSearchFocused ? 'focused' : ''}`}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="8"></circle>
-            <path d="m21 21-4.35-4.35"></path>
-          </svg>
-          <input
-            type="text"
-            placeholder="Search customer, IMEI, job, product..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setIsSearchFocused(true)}
-            onBlur={() => setIsSearchFocused(false)}
-            className="search-input"
-          />
-          {searchQuery && (
-            <button
-              className="search-clear"
-              onClick={() => setSearchQuery('')}
-            >
-              x
-            </button>
-          )}
-        </div>
-
         <div className="header-right">
           <div className="store-switcher-wrapper" ref={storeMenuRef}>
             <button className="store-switcher" onClick={() => setShowStoreMenu(!showStoreMenu)}>
@@ -177,16 +126,6 @@ const Header: React.FC<HeaderProps> = ({
                 ))}
               </div>
             )}
-          </div>
-
-          <div className="notification-wrapper" ref={notificationRef}>
-            <button className="header-icon-btn notification-btn" onClick={() => setShowNotifications(!showNotifications)} title="Notifications">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-              </svg>
-              <span className="notification-badge">{notifications.length}</span>
-            </button>
           </div>
 
           <button className="header-icon-btn" onClick={toggleDarkMode} title={isDarkMode ? 'Light Mode' : 'Dark Mode'}>

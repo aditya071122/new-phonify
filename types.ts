@@ -24,6 +24,9 @@ export interface User {
   createdAt: string;
 }
 
+export const isPrivilegedUser = (user: Pick<User, 'role'> | null | undefined): boolean =>
+  user?.role === 'Admin' || user?.role === 'Manager';
+
 // ==================== STORE MANAGEMENT ====================
 export type StoreType = 'Main' | 'Secondary';
 

@@ -1,18 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { User } from '../types';
+import { User, isPrivilegedUser } from '../types';
 import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import {
   downloadBriefReportCSV,
+  listExpenses,
+  listPaymentEntries,
   listBuybacks,
   listProducts,
   listRepairs,
   listSales,
   listStores,
   type ApiBuyback,
+  type ApiExpense,
+  type ApiPaymentEntry,
   type ApiProduct,
   type ApiRepairTicket,
   type ApiSale,
@@ -35,11 +39,6 @@ const inRange = (dateIso: string, timeRange: string): boolean => {
   return diffDays <= 366;
 };
 
-const storeFromSale = (sale: ApiSale): string => {
-  const noteMatch = sale.notes?.match(/store=([^|]+)/i);
-  return noteMatch?.[1]?.trim() || 'Main Branch';
-};
-
 const FinancialDashboard: React.FC<{ user: User }> = ({ user }) => {
   const [searchParams] = useSearchParams();
   const globalStore = searchParams.get('store') || 'All Stores';
@@ -50,25 +49,29 @@ const FinancialDashboard: React.FC<{ user: User }> = ({ user }) => {
   const [buybacks, setBuybacks] = useState<ApiBuyback[]>([]);
   const [repairs, setRepairs] = useState<ApiRepairTicket[]>([]);
   const [products, setProducts] = useState<ApiProduct[]>([]);
+  const [expenses, setExpenses] = useState<ApiExpense[]>([]);
+  const [paymentEntries, setPaymentEntries] = useState<ApiPaymentEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reportMode, setReportMode] = useState<'days' | 'month'>('month');
   const [reportFrom, setReportFrom] = useState(new Date(Date.now() - (7 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10));
   const [reportTo, setReportTo] = useState(new Date().toISOString().slice(0, 10));
   const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [downloading, setDownloading] = useState(false);
+  const [downloadingSection, setDownloadingSection] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
         setError('');
-        const [st, s, b, r, p] = await Promise.all([listStores(), listSales(), listBuybacks(), listRepairs(), listProducts()]);
+        const [st, s, b, r, p, e, pay] = await Promise.all([listStores(), listSales(), listBuybacks(), listRepairs(), listProducts(), listExpenses(), listPaymentEntries()]);
         setStores(st);
         setSales(s);
         setBuybacks(b);
         setRepairs(r);
         setProducts(p);
+        setExpenses(e);
+        setPaymentEntries(pay);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load financial reports');
       } finally {
@@ -83,24 +86,39 @@ const FinancialDashboard: React.FC<{ user: User }> = ({ user }) => {
 
   const salesByStore = useMemo(() => {
     if (globalStore === 'All Stores') return sales;
-    return sales.filter((s) => (s.store_ref ? s.store_ref === selectedStoreId : storeFromSale(s) === globalStore));
+    return sales.filter((entry) => entry.store_ref === selectedStoreId);
   }, [sales, globalStore, selectedStoreId]);
 
   const buybacksByStore = useMemo(() => {
     if (globalStore === 'All Stores') return buybacks;
-    if (!selectedStoreId) return buybacks;
-    return buybacks.filter((b) => b.store_ref === selectedStoreId);
+    return buybacks.filter((entry) => entry.store_ref === selectedStoreId);
   }, [buybacks, globalStore, selectedStoreId]);
 
   const repairsByStore = useMemo(() => {
     if (globalStore === 'All Stores') return repairs;
-    if (!selectedStoreId) return repairs;
-    return repairs.filter((r) => r.store_ref === selectedStoreId);
+    return repairs.filter((entry) => entry.store_ref === selectedStoreId);
   }, [repairs, globalStore, selectedStoreId]);
+
+  const productsByStore = useMemo(() => {
+    if (globalStore === 'All Stores') return products;
+    return products.filter((entry) => entry.primary_store_ref === selectedStoreId);
+  }, [products, globalStore, selectedStoreId]);
+
+  const expensesByStore = useMemo(() => {
+    if (globalStore === 'All Stores') return expenses;
+    return expenses.filter((entry) => entry.store_ref === selectedStoreId);
+  }, [expenses, globalStore, selectedStoreId]);
+
+  const paymentsByStore = useMemo(() => {
+    if (globalStore === 'All Stores') return paymentEntries;
+    return paymentEntries.filter((entry) => entry.store_ref === selectedStoreId);
+  }, [paymentEntries, globalStore, selectedStoreId]);
 
   const filteredSales = useMemo(() => salesByStore.filter((s) => inRange(s.sold_at, timeRange)), [salesByStore, timeRange]);
   const filteredBuybacks = useMemo(() => buybacksByStore.filter((b) => inRange(b.created_at, timeRange)), [buybacksByStore, timeRange]);
   const filteredRepairs = useMemo(() => repairsByStore.filter((r) => inRange(r.created_at, timeRange)), [repairsByStore, timeRange]);
+  const filteredExpenses = useMemo(() => expensesByStore.filter((entry) => inRange(entry.expense_date, timeRange)), [expensesByStore, timeRange]);
+  const filteredPayments = useMemo(() => paymentsByStore.filter((entry) => inRange(entry.entry_date, timeRange)), [paymentsByStore, timeRange]);
 
   const cashflowData = useMemo(() => {
     const months = new Map<string, { month: string; revenue: number; expenses: number; profit: number }>();
@@ -111,80 +129,82 @@ const FinancialDashboard: React.FC<{ user: User }> = ({ user }) => {
       months.set(key, prev);
     });
 
-    filteredBuybacks.forEach((b) => {
-      const key = new Date(b.created_at).toISOString().slice(0, 7);
-      const prev = months.get(key) || { month: monthLabel(b.created_at), revenue: 0, expenses: 0, profit: 0 };
-      prev.expenses += Number(b.negotiated_price || 0);
+    filteredExpenses.forEach((entry) => {
+      const key = new Date(entry.expense_date).toISOString().slice(0, 7);
+      const prev = months.get(key) || { month: monthLabel(entry.expense_date), revenue: 0, expenses: 0, profit: 0 };
+      prev.expenses += Number(entry.out_cash || 0) + Number(entry.out_online || 0);
       months.set(key, prev);
     });
 
-    filteredRepairs.forEach((r) => {
-      const key = new Date(r.created_at).toISOString().slice(0, 7);
-      const prev = months.get(key) || { month: monthLabel(r.created_at), revenue: 0, expenses: 0, profit: 0 };
-      prev.revenue += Number(r.labor_cost || 0);
+    filteredBuybacks.forEach((entry) => {
+      const key = new Date(entry.created_at).toISOString().slice(0, 7);
+      const prev = months.get(key) || { month: monthLabel(entry.created_at), revenue: 0, expenses: 0, profit: 0 };
+      prev.expenses += 0;
+      months.set(key, prev);
+    });
+
+    filteredRepairs.forEach((entry) => {
+      const key = new Date(entry.created_at).toISOString().slice(0, 7);
+      const prev = months.get(key) || { month: monthLabel(entry.created_at), revenue: 0, expenses: 0, profit: 0 };
+      prev.revenue += Number(entry.labor_cost || 0);
       months.set(key, prev);
     });
 
     return Array.from(months.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .slice(-6)
-      .map(([, v]) => ({ ...v, profit: v.revenue - v.expenses }));
-  }, [filteredSales, filteredBuybacks, filteredRepairs]);
+      .map(([, value]) => ({ ...value, profit: value.revenue - value.expenses }));
+  }, [filteredSales, filteredBuybacks, filteredRepairs, filteredExpenses]);
 
   const receivablesData = useMemo(() => {
-    const pendingRepairs = filteredRepairs.filter((r) => r.status !== 'Delivered');
-    const pendingAmount = pendingRepairs.reduce((sum, r) => sum + Number(r.labor_cost || 0), 0);
+    const pendingRepairs = filteredRepairs.filter((entry) => entry.status !== 'Delivered');
+    const pendingAmount = filteredPayments.filter((entry) => entry.entry_type === 'in').reduce((sum, entry) => sum + Number(entry.cash_amount || 0) + Number(entry.online_amount || 0), 0);
     return [
-      { range: 'Current', amount: pendingAmount, count: pendingRepairs.length },
+      { range: 'Current', amount: pendingAmount, count: filteredPayments.filter((entry) => entry.entry_type === 'in').length },
       { range: '30-60 Days', amount: 0, count: 0 },
       { range: '60-90 Days', amount: 0, count: 0 },
       { range: '90+ Days', amount: 0, count: 0 },
     ];
-  }, [filteredRepairs]);
+  }, [filteredPayments]);
 
   const payablesData = useMemo(() => {
-    const pendingBuybacks = filteredBuybacks.filter((b) => b.status === 'Pending');
-    const amount = pendingBuybacks.reduce((sum, b) => sum + Number(b.negotiated_price || 0), 0);
+    const outEntries = filteredPayments.filter((entry) => entry.entry_type === 'out');
+    const amount = outEntries.reduce((sum, entry) => sum + Number(entry.cash_amount || 0) + Number(entry.online_amount || 0), 0);
     return [
-      { range: 'Current', amount, count: pendingBuybacks.length },
+      { range: 'Current', amount, count: outEntries.length },
       { range: '30-60 Days', amount: 0, count: 0 },
       { range: '60-90 Days', amount: 0, count: 0 },
       { range: '90+ Days', amount: 0, count: 0 },
     ];
-  }, [filteredBuybacks]);
+  }, [filteredPayments]);
 
   const storeProfit = useMemo(() => {
     if (globalStore !== 'All Stores') {
-      const rev = cashflowData.reduce((sum, m) => sum + m.revenue, 0);
-      const prof = cashflowData.reduce((sum, m) => sum + m.profit, 0);
+      const rev = cashflowData.reduce((sum, month) => sum + month.revenue, 0);
+      const prof = cashflowData.reduce((sum, month) => sum + month.profit, 0);
       return [{ name: globalStore, revenue: rev, target: Math.round(rev * 1.1), profit: prof }];
     }
 
-    const grouped = new Map<string, { revenue: number; profit: number }>();
-    sales.forEach((s) => {
-      const store = s.store_ref ? stores.find((st) => st.id === s.store_ref)?.name || 'Unknown' : storeFromSale(s);
-      const current = grouped.get(store) || { revenue: 0, profit: 0 };
-      current.revenue += Number(s.total_amount || 0);
-      current.profit += Number(s.total_amount || 0);
-      grouped.set(store, current);
+    return stores.map((store) => {
+      const revenue = sales.filter((entry) => entry.store_ref === store.id).reduce((sum, entry) => sum + Number(entry.total_amount || 0), 0);
+      const expensesTotal = expenses.filter((entry) => entry.store_ref === store.id).reduce((sum, entry) => sum + Number(entry.out_cash || 0) + Number(entry.out_online || 0), 0);
+      return {
+        name: store.name,
+        revenue,
+        target: Math.round(revenue * 1.1),
+        profit: revenue - expensesTotal,
+      };
     });
-
-    return Array.from(grouped.entries()).map(([name, val]) => ({
-      name,
-      revenue: val.revenue,
-      target: Math.round(val.revenue * 1.1),
-      profit: val.profit,
-    }));
-  }, [globalStore, cashflowData, sales, stores]);
+  }, [globalStore, cashflowData, stores, sales, expenses]);
 
   const metrics = useMemo(() => {
-    const revenue = cashflowData.reduce((sum, m) => sum + m.revenue, 0);
-    const expenses = cashflowData.reduce((sum, m) => sum + m.expenses, 0);
+    const revenue = cashflowData.reduce((sum, month) => sum + month.revenue, 0);
+    const expenses = cashflowData.reduce((sum, month) => sum + month.expenses, 0);
     const profit = revenue - expenses;
-    const receivables = receivablesData.reduce((sum, d) => sum + d.amount, 0);
-    const stockValue = products.reduce((sum, p) => sum + Number(p.price) * p.stock_quantity, 0);
+    const receivables = receivablesData.reduce((sum, item) => sum + item.amount, 0);
+    const stockValue = productsByStore.reduce((sum, product) => sum + Number(product.price) * product.stock_quantity, 0);
     return { revenue, expenses, profit, receivables, stockValue };
-  }, [cashflowData, receivablesData, products]);
+  }, [cashflowData, receivablesData, productsByStore]);
 
   const kpis = [
     { label: 'Revenue', value: `Rs ${Math.round(metrics.revenue).toLocaleString()}`, trend: `${filteredSales.length} sales`, bg: 'linear-gradient(135deg, var(--primary) 0%, #1e40af 100%)' },
@@ -193,18 +213,22 @@ const FinancialDashboard: React.FC<{ user: User }> = ({ user }) => {
     { label: 'Receivables', value: `Rs ${Math.round(metrics.receivables).toLocaleString()}`, trend: `Stock Rs ${Math.round(metrics.stockValue).toLocaleString()}`, bg: 'linear-gradient(135deg, var(--teal) 0%, #0f766e 100%)' },
   ];
 
-  const handleDownloadBriefReport = async () => {
+  const handleDownloadBriefReport = async (section: string) => {
     try {
-      setDownloading(true);
+      setDownloadingSection(section);
       const params = reportMode === 'month'
         ? { month: reportMonth }
         : { from: reportFrom, to: reportTo };
-      const blob = await downloadBriefReportCSV(params);
+      const blob = await downloadBriefReportCSV({
+        ...params,
+        store: globalStore !== 'All Stores' ? globalStore : undefined,
+        section,
+      });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       const label = reportMode === 'month' ? reportMonth : `${reportFrom}_to_${reportTo}`;
       a.href = url;
-      a.download = `brief_report_${label}.csv`;
+      a.download = `${section}_report_${label}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -212,14 +236,76 @@ const FinancialDashboard: React.FC<{ user: User }> = ({ user }) => {
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to download report');
     } finally {
-      setDownloading(false);
+      setDownloadingSection(null);
     }
   };
+
+  if (!isPrivilegedUser(user)) {
+    return (
+      <div className="financial-container">
+        <div className="financial-header">
+          <h1>Financial Dashboard</h1>
+          <div className="time-selector">
+            {['Day', 'Week', 'Month', 'Quarter', 'Year'].map((range) => (
+              <button key={range} className={`time-btn ${timeRange === range ? 'active' : ''}`} onClick={() => setTimeRange(range)}>{range}</button>
+            ))}
+          </div>
+        </div>
+
+        {loading && <p>Loading reports...</p>}
+        {error && <p style={{ color: '#dc2626' }}>{error}</p>}
+
+        <div className="kpi-grid">
+          {kpis.map((kpi, index) => (
+            <div key={index} className="kpi-card-fin" style={{ background: kpi.bg }}>
+              <div className="kpi-content"><p className="kpi-label">{kpi.label}</p><h2 className="kpi-value">{kpi.value}</h2><span className="kpi-trend">{kpi.trend}</span></div>
+            </div>
+          ))}
+        </div>
+
+        <div className="charts-grid">
+          <div className="chart-card chart-lg">
+            <div className="chart-header"><h3>Cash Flow Trend</h3><span className="chart-info">{globalStore} | {timeRange}</span></div>
+            <ResponsiveContainer width="100%" height={320}>
+              <AreaChart data={cashflowData}>
+                <defs>
+                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--primary)" stopOpacity={0.8} /><stop offset="95%" stopColor="var(--primary)" stopOpacity={0} /></linearGradient>
+                  <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--warning)" stopOpacity={0.8} /><stop offset="95%" stopColor="var(--warning)" stopOpacity={0} /></linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                <XAxis dataKey="month" stroke="var(--text-secondary)" />
+                <YAxis stroke="var(--text-secondary)" />
+                <Tooltip contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)' }} />
+                <Legend />
+                <Area type="monotone" dataKey="revenue" stroke="var(--primary)" fillOpacity={1} fill="url(#colorRevenue)" name="Revenue" />
+                <Area type="monotone" dataKey="expenses" stroke="var(--warning)" fillOpacity={1} fill="url(#colorExpenses)" name="Expenses" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="chart-card">
+            <div className="chart-header"><h3>Store Profitability</h3></div>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={storeProfit}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                <XAxis dataKey="name" stroke="var(--text-secondary)" />
+                <YAxis stroke="var(--text-secondary)" />
+                <Tooltip contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)' }} />
+                <Legend />
+                <Bar dataKey="revenue" fill="var(--primary)" name="Revenue" />
+                <Bar dataKey="profit" fill="var(--success)" name="Profit" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="financial-container">
       <div className="financial-header">
-        <h1>Financial Dashboard</h1>
+        <h1>Reports Center</h1>
         <div className="time-selector">
           {['Day', 'Week', 'Month', 'Quarter', 'Year'].map((range) => (
             <button key={range} className={`time-btn ${timeRange === range ? 'active' : ''}`} onClick={() => setTimeRange(range)}>{range}</button>
@@ -230,36 +316,46 @@ const FinancialDashboard: React.FC<{ user: User }> = ({ user }) => {
       {loading && <p>Loading reports...</p>}
       {error && <p style={{ color: '#dc2626' }}>{error}</p>}
 
-      {user.role === 'Admin' && (
-        <div className="chart-card" style={{ marginBottom: 16 }}>
-          <div className="chart-header"><h3>Brief Report Download</h3><span className="chart-info">Admin only</span></div>
-          <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+      <div className="chart-card" style={{ marginBottom: 16 }}>
+        <div className="chart-header"><h3>Module Report Downloads</h3><span className="chart-info">{globalStore}</span></div>
+        <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button className={`time-btn ${reportMode === 'month' ? 'active' : ''}`} onClick={() => setReportMode('month')}>By Month</button>
+            <button className={`time-btn ${reportMode === 'days' ? 'active' : ''}`} onClick={() => setReportMode('days')}>By Day Range</button>
+          </div>
+
+          {reportMode === 'month' ? (
+            <input type="month" className="time-btn" style={{ maxWidth: 220, textAlign: 'left' }} value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} />
+          ) : (
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button className={`time-btn ${reportMode === 'month' ? 'active' : ''}`} onClick={() => setReportMode('month')}>By Month</button>
-              <button className={`time-btn ${reportMode === 'days' ? 'active' : ''}`} onClick={() => setReportMode('days')}>By Day Range</button>
+              <input type="date" className="time-btn" style={{ maxWidth: 220, textAlign: 'left' }} value={reportFrom} onChange={(e) => setReportFrom(e.target.value)} />
+              <input type="date" className="time-btn" style={{ maxWidth: 220, textAlign: 'left' }} value={reportTo} onChange={(e) => setReportTo(e.target.value)} />
             </div>
+          )}
 
-            {reportMode === 'month' ? (
-              <input type="month" className="time-btn" style={{ maxWidth: 220, textAlign: 'left' }} value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} />
-            ) : (
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <input type="date" className="time-btn" style={{ maxWidth: 220, textAlign: 'left' }} value={reportFrom} onChange={(e) => setReportFrom(e.target.value)} />
-                <input type="date" className="time-btn" style={{ maxWidth: 220, textAlign: 'left' }} value={reportTo} onChange={(e) => setReportTo(e.target.value)} />
-              </div>
-            )}
-
-            <div>
-              <button className="time-btn active" onClick={handleDownloadBriefReport} disabled={downloading}>
-                {downloading ? 'Preparing CSV...' : 'Download Brief Report'}
+          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+            {[
+              { key: 'overall', label: 'Overall Report' },
+              { key: 'sales', label: 'Sales Report' },
+              { key: 'accessories', label: 'Accessories Report' },
+              { key: 'buybacks', label: 'Buybacks Report' },
+              { key: 'repairs', label: 'Repairs Report' },
+              { key: 'expenses', label: 'Expenses Report' },
+              { key: 'payments', label: 'Payments Report' },
+              { key: 'inventory', label: 'Inventory Report' },
+              { key: 'customers', label: 'Customers Report' },
+            ].map((section) => (
+              <button key={section.key} className="time-btn active" onClick={() => void handleDownloadBriefReport(section.key)} disabled={downloadingSection !== null}>
+                {downloadingSection === section.key ? 'Preparing CSV...' : section.label}
               </button>
-            </div>
+            ))}
           </div>
         </div>
-      )}
+      </div>
 
       <div className="kpi-grid">
-        {kpis.map((kpi, i) => (
-          <div key={i} className="kpi-card-fin" style={{ background: kpi.bg }}>
+        {kpis.map((kpi, index) => (
+          <div key={index} className="kpi-card-fin" style={{ background: kpi.bg }}>
             <div className="kpi-content"><p className="kpi-label">{kpi.label}</p><h2 className="kpi-value">{kpi.value}</h2><span className="kpi-trend">{kpi.trend}</span></div>
           </div>
         ))}
@@ -304,14 +400,14 @@ const FinancialDashboard: React.FC<{ user: User }> = ({ user }) => {
       <div className="aging-grid">
         <div className="aging-card">
           <h3>Receivables Aging</h3>
-          <table className="aging-table"><thead><tr><th>Period</th><th>Amount</th><th>Invoices</th></tr></thead><tbody>{receivablesData.map((item, i) => <tr key={i}><td className="period-cell">{item.range}</td><td className="amount-cell">Rs {item.amount.toLocaleString()}</td><td className="count-cell badge">{item.count}</td></tr>)}</tbody></table>
-          <div className="total-row"><strong>Total Receivables</strong><strong>Rs {receivablesData.reduce((sum, d) => sum + d.amount, 0).toLocaleString()}</strong></div>
+          <table className="aging-table"><thead><tr><th>Period</th><th>Amount</th><th>Invoices</th></tr></thead><tbody>{receivablesData.map((item, index) => <tr key={index}><td className="period-cell">{item.range}</td><td className="amount-cell">Rs {item.amount.toLocaleString()}</td><td className="count-cell badge">{item.count}</td></tr>)}</tbody></table>
+          <div className="total-row"><strong>Total Receivables</strong><strong>Rs {receivablesData.reduce((sum, item) => sum + item.amount, 0).toLocaleString()}</strong></div>
         </div>
 
         <div className="aging-card">
           <h3>Payables Aging</h3>
-          <table className="aging-table"><thead><tr><th>Period</th><th>Amount</th><th>Bills</th></tr></thead><tbody>{payablesData.map((item, i) => <tr key={i}><td className="period-cell">{item.range}</td><td className="amount-cell">Rs {item.amount.toLocaleString()}</td><td className="count-cell badge">{item.count}</td></tr>)}</tbody></table>
-          <div className="total-row"><strong>Total Payables</strong><strong>Rs {payablesData.reduce((sum, d) => sum + d.amount, 0).toLocaleString()}</strong></div>
+          <table className="aging-table"><thead><tr><th>Period</th><th>Amount</th><th>Bills</th></tr></thead><tbody>{payablesData.map((item, index) => <tr key={index}><td className="period-cell">{item.range}</td><td className="amount-cell">Rs {item.amount.toLocaleString()}</td><td className="count-cell badge">{item.count}</td></tr>)}</tbody></table>
+          <div className="total-row"><strong>Total Payables</strong><strong>Rs {payablesData.reduce((sum, item) => sum + item.amount, 0).toLocaleString()}</strong></div>
         </div>
       </div>
     </div>
