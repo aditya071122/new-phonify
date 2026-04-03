@@ -4,6 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-me-in-production")
 DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
@@ -53,7 +54,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'backend.wsgi.application'
 ASGI_APPLICATION = 'backend.asgi.application'
 
-load_dotenv()
+postgres_sslmode = os.getenv("POSTGRES_SSLMODE", "require").strip() or "require"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -62,7 +63,7 @@ DATABASES = {
         "PASSWORD": os.getenv("POSTGRES_PASSWORD"),
         "HOST": os.getenv("POSTGRES_HOST"),
         "PORT": os.getenv("POSTGRES_PORT", "5432"),
-        "OPTIONS": {"sslmode": "require"},
+        "OPTIONS": {"sslmode": postgres_sslmode},
     }
 }
 
